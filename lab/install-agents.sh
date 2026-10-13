@@ -19,10 +19,12 @@ echo "==> Installing the New Relic CLI"
 curl -L https://download.newrelic.com/install/newrelic-cli/scripts/install.sh | bash
 
 echo
-echo "==> Starting the guided install (answer 'n' or skip when it offers Redis)"
+echo "==> Starting the guided install (skip Redis if it offers it; the optional Redis step adds it)"
 sudo NEW_RELIC_API_KEY="$NEW_RELIC_API_KEY" NEW_RELIC_ACCOUNT_ID="$NEW_RELIC_ACCOUNT_ID" \
   /usr/local/bin/newrelic install --tag env:lab
 
 echo
 echo "==> Done. Host agent status:"
 systemctl is-active newrelic-infra || true
+echo
+echo "Optional, after ./lab/start.sh: ./lab/install-redis-integration.sh monitors the Redis container."
