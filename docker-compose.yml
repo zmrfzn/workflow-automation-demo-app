@@ -19,6 +19,9 @@ services:
     image: redis:7-alpine
     container_name: wfa-redis
     command: ["redis-server", "--maxmemory", "32mb", "--maxmemory-policy", "allkeys-lru"]
+    # Loopback only, so the host's New Relic guided install can attach its Redis integration.
+    ports:
+      - "127.0.0.1:6379:6379"
     mem_limit: 64m
     restart: unless-stopped
 
@@ -28,9 +31,11 @@ services:
     environment:
       - TARGET_URL=http://shop-api:5000
       - INTERVAL=${LOAD_INTERVAL:-0.5}
+      - NEW_RELIC_LICENSE_KEY=${NEW_RELIC_LICENSE_KEY:-}
+      - NEW_RELIC_APP_NAME=workflow-automation-loadgen
     depends_on:
       - shop-api
-    mem_limit: 64m
+    mem_limit: 128m
     restart: unless-stopped
 
   controller:
@@ -47,12 +52,14 @@ services:
       - ROLLBACK_SECRET=${ROLLBACK_SECRET:-}
       - NEW_RELIC_API_KEY=${NEW_RELIC_API_KEY:-}
       - NEW_RELIC_ACCOUNT_ID=${NEW_RELIC_ACCOUNT_ID:-}
-      - NEW_RELIC_APP_NAME=${NEW_RELIC_APP_NAME:-workflow-automation-app}
+      - NEW_RELIC_LICENSE_KEY=${NEW_RELIC_LICENSE_KEY:-}
+      - NEW_RELIC_APP_NAME=workflow-automation-controller
+      - TARGET_APP_NAME=${NEW_RELIC_APP_NAME:-workflow-automation-app}
       - COMPOSE_PROJECT=wfa
       - COMPOSE_DIR=/workspace
       - APP_URL=http://shop-api:5000
       - REDIS_HOST=redis
     depends_on:
       - shop-api
-    mem_limit: 128m
+    mem_limit: 192m
     restart: unless-stopped

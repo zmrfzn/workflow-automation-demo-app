@@ -26,7 +26,9 @@ SERVICE = "shop-api"
 PROJECT = os.environ.get("COMPOSE_PROJECT", "wfa")
 COMPOSE_DIR = os.environ.get("COMPOSE_DIR", "/workspace")
 APP_URL = os.environ.get("APP_URL", "http://shop-api:5000")
-APP_NAME = os.environ.get("NEW_RELIC_APP_NAME", "workflow-automation-app")
+# The app whose change-tracking markers we write. Deliberately NOT NEW_RELIC_APP_NAME, which names
+# this controller's own APM entity.
+TARGET_APP_NAME = os.environ.get("TARGET_APP_NAME", "workflow-automation-app")
 NERDGRAPH = "https://api.newrelic.com/graphql"
 HEALTH_TIMEOUT = int(os.environ.get("HEALTH_TIMEOUT", "60"))
 
@@ -96,10 +98,10 @@ def entity_guid():
         return _guid_cache["guid"]
     data = nerdgraph(
         "query($q: String!) { actor { entitySearch(query: $q) { results { entities { guid name } } } } }",
-        {"q": f"name = '{APP_NAME}' AND domain = 'APM' AND type = 'APPLICATION'"})
+        {"q": f"name = '{TARGET_APP_NAME}' AND domain = 'APM' AND type = 'APPLICATION'"})
     entities = data["actor"]["entitySearch"]["results"]["entities"]
     if not entities:
-        raise RuntimeError(f"no APM entity named {APP_NAME} yet")
+        raise RuntimeError(f"no APM entity named {TARGET_APP_NAME} yet")
     _guid_cache["guid"] = entities[0]["guid"]
     return _guid_cache["guid"]
 
