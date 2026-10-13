@@ -1,0 +1,58 @@
+name: wfa
+
+services:
+  shop-api:
+    image: ${APP_IMAGE:-ghcr.io/zmrfzn/workflow-automation-app}:${APP_TAG:-v1}
+    container_name: wfa-shop-api
+    ports:
+      - "5000:5000"
+    environment:
+      - NEW_RELIC_LICENSE_KEY=${NEW_RELIC_LICENSE_KEY:-}
+      - NEW_RELIC_APP_NAME=${NEW_RELIC_APP_NAME:-workflow-automation-app}
+      - REDIS_HOST=redis
+    depends_on:
+      - redis
+    mem_limit: 256m
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    container_name: wfa-redis
+    command: ["redis-server", "--maxmemory", "32mb", "--maxmemory-policy", "allkeys-lru"]
+    mem_limit: 64m
+    restart: unless-stopped
+
+  loadgen:
+    image: ${LOADGEN_IMAGE:-ghcr.io/zmrfzn/workflow-automation-loadgen}:${LAB_TAG:-1}
+    container_name: wfa-loadgen
+    environment:
+      - TARGET_URL=http://shop-api:5000
+      - INTERVAL=${LOAD_INTERVAL:-0.5}
+    depends_on:
+      - shop-api
+    mem_limit: 64m
+    restart: unless-stopped
+
+  controller:
+    image: ${CONTROLLER_IMAGE:-ghcr.io/zmrfzn/workflow-automation-controller}:${LAB_TAG:-1}
+    container_name: wfa-controller
+    ports:
+      - "5001:5001"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      # Read-only copy of this project so the controller can run `docker compose`.
+      # shop-api has no bind mounts, so recreating it from /workspace resolves no host paths.
+      - ./:/workspace:ro
+    environment:
+      - ROLLBACK_SECRET=${ROLLBACK_SECRET:-}
+      - NEW_RELIC_API_KEY=${NEW_RELIC_API_KEY:-}
+      - NEW_RELIC_ACCOUNT_ID=${NEW_RELIC_ACCOUNT_ID:-}
+      - NEW_RELIC_APP_NAME=${NEW_RELIC_APP_NAME:-workflow-automation-app}
+      - COMPOSE_PROJECT=wfa
+      - COMPOSE_DIR=/workspace
+      - APP_URL=http://shop-api:5000
+      - REDIS_HOST=redis
+    depends_on:
+      - shop-api
+    mem_limit: 128m
+    restart: unless-stopped
