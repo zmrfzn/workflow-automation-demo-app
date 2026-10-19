@@ -20,6 +20,7 @@ import argparse
 import base64
 import json
 import os
+import re
 import sys
 import urllib.error
 import urllib.request
@@ -266,9 +267,23 @@ def ensure_destinations(key, account, args):
     return email_id, wfa_id
 
 
+# Workflow Automation rejects any other character in a definition's description.
+DESCRIPTION_OK = re.compile(r"^[A-Za-z0-9 _-]*$")
+
+
+def check_definition(yaml_text):
+    """Catch what NerdGraph would reject, with a message that says which line to fix."""
+    for line in yaml_text.splitlines():
+        if line.startswith("description:"):
+            value = line.split(":", 1)[1].strip().strip("'\"")
+            if not DESCRIPTION_OK.match(value):
+                raise BootstrapError(f"description may only use letters, numbers, spaces, '_' and '-': {value!r}")
+
+
 def ensure_definition(key, account, path):
     with open(path) as f:
         yaml_text = f.read()
+    check_definition(yaml_text)
     encoded = base64.b64encode(yaml_text.encode()).decode()
     if DRY_RUN:
         print(f"  [dry-run] definition: upload {path} ({len(yaml_text)} bytes) to account {account}")

@@ -2,7 +2,7 @@
 # CONTROLLER_URL and ROLLBACK_TOKEN are placeholders: ./lab/controller-url.sh prints both values.
 # Step names and inputs follow the proven demo workflow; output paths marked UNVERIFIED need a live run.
 name: shop_api_error_rollback
-description: Roll back wfa-shop-api when its error rate is high.
+description: Roll back wfa-shop-api when its error rate is high
 workflowInputs:
   accountId:
     type: Int

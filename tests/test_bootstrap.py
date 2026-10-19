@@ -112,6 +112,16 @@ class BootstrapTests(unittest.TestCase):
         with mock.patch.dict(os.environ, {"NEW_RELIC_API_KEY": ""}), mock.patch("sys.stderr"):
             self.assertEqual(self.run_cli("status"), 1)
 
+    def test_shipped_definitions_pass_the_description_rule(self):
+        root = os.path.join(os.path.dirname(__file__), "..", "workflows")
+        for name in os.listdir(root):
+            with open(os.path.join(root, name)) as f:
+                wb.check_definition(f.read())
+
+    def test_description_with_punctuation_is_rejected(self):
+        with self.assertRaises(wb.BootstrapError):
+            wb.check_definition("name: x\ndescription: Roll back when high.\n")
+
 
 if __name__ == "__main__":
     unittest.main()

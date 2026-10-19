@@ -31,13 +31,42 @@ APP_URL = os.environ.get("APP_URL", "http://shop-api:5000")
 TARGET_APP_NAME = os.environ.get("TARGET_APP_NAME", "wfa-shop-api")
 NERDGRAPH = "https://api.newrelic.com/graphql"
 HEALTH_TIMEOUT = int(os.environ.get("HEALTH_TIMEOUT", "60"))
+# Action history survives a controller restart when this points at a mounted volume.
+# Lab checks read the history, so losing it on a recreate would fail them. Empty disables it.
+HISTORY_FILE = os.environ.get("HISTORY_FILE", "")
 
 app = Flask(__name__)
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 log = logging.getLogger("controller")
 
 _lock = threading.Lock()
-_history = []
+
+
+def load_history():
+    if not HISTORY_FILE:
+        return []
+    try:
+        with open(HISTORY_FILE) as f:
+            data = json.load(f)
+        return data[-20:] if isinstance(data, list) else []
+    except (OSError, ValueError):
+        return []
+
+
+def save_history():
+    """Atomic write, so a crash mid-write never leaves a half file behind."""
+    if not HISTORY_FILE:
+        return
+    try:
+        tmp = HISTORY_FILE + ".tmp"
+        with open(tmp, "w") as f:
+            json.dump(_history, f)
+        os.replace(tmp, HISTORY_FILE)
+    except OSError as e:
+        log_event(event="history_save_failed", error=str(e))
+
+
+_history = load_history()
 _guid_cache = {}
 
 
@@ -162,6 +191,7 @@ def switch(target, action, reason="", triggered_by=""):
                                error=str(getattr(e, "stderr", None) or e)[:300])
         _history.append({"ts": datetime.now(timezone.utc).isoformat(), **payload})
         del _history[:-20]
+        save_history()
     log_event(event="action", **payload)
     return payload
 

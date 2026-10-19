@@ -48,6 +48,8 @@ services:
       # Read-only copy of this project so the controller can run `docker compose`.
       # shop-api has no bind mounts, so recreating it from /workspace resolves no host paths.
       - ./:/workspace:ro
+      # Named volume: the action history outlives a recreate (lab checks read it).
+      - controller-data:/data
     environment:
       - ROLLBACK_SECRET=${ROLLBACK_SECRET:-}
       - NEW_RELIC_API_KEY=${NEW_RELIC_API_KEY:-}
@@ -56,6 +58,7 @@ services:
       - NEW_RELIC_APP_NAME=wfa-controller
       - TARGET_APP_NAME=wfa-shop-api
       - COMPOSE_PROJECT=wfa
+      - HISTORY_FILE=/data/history.json
       - COMPOSE_DIR=/workspace
       - APP_URL=http://shop-api:5000
       - REDIS_HOST=redis
@@ -63,3 +66,6 @@ services:
       - shop-api
     mem_limit: 192m
     restart: unless-stopped
+
+volumes:
+  controller-data:

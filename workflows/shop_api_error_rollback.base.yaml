@@ -2,7 +2,7 @@
 # Deploy: ./lab/wfa_bootstrap.py definition --file workflows/shop_api_error_rollback.base.yaml
 # Challenge 04 extends this same definition in the New Relic workflow canvas.
 name: shop_api_error_rollback
-description: Roll back wfa-shop-api when its error rate is high.
+description: Roll back wfa-shop-api when its error rate is high
 workflowInputs:
   accountId:
     type: Int

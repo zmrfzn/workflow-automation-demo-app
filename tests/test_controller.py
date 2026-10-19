@@ -1,5 +1,6 @@
 import os
 import sys
+import tempfile
 import unittest
 from unittest import mock
 
@@ -123,6 +124,26 @@ class ControllerTests(unittest.TestCase):
         # Check the key only: a failing assertNotIn would print the whole environment, tokens included.
         self.assertFalse("NEW_RELIC_APP_NAME" in env, "NEW_RELIC_APP_NAME leaked into compose env")
         self.assertEqual(env["APP_TAG"], "v2")
+
+    def test_history_survives_a_restart(self):
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "history.json")
+            with mock.patch.object(controller, "HISTORY_FILE", path):
+                self.client.post("/rollback", headers=AUTH, json={"triggered_by": "test"})
+                self.assertTrue(os.path.exists(path))
+                controller._history.clear()  # what a restart does
+                reloaded = controller.load_history()
+        self.assertEqual(reloaded[-1]["action"], "rollback")
+        self.assertEqual(reloaded[-1]["triggered_by"], "test")
+
+    def test_unreadable_history_starts_empty(self):
+        with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as f:
+            f.write("{not json")
+        try:
+            with mock.patch.object(controller, "HISTORY_FILE", f.name):
+                self.assertEqual(controller.load_history(), [])
+        finally:
+            os.unlink(f.name)
 
 
 if __name__ == "__main__":
