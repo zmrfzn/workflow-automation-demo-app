@@ -1,0 +1,25 @@
+# Base definition for challenge 03: one step that writes a log line.
+# Deploy: ./lab/wfa_bootstrap.py definition --file workflows/shop_api_error_rollback.base.yaml
+# Challenge 04 extends this same definition in the New Relic workflow canvas.
+name: shop_api_error_rollback
+description: Roll back wfa-shop-api when its error rate is high.
+workflowInputs:
+  accountId:
+    type: Int
+    required: false
+  issueId:
+    type: String
+    required: false
+steps:
+  - name: logStart
+    type: action
+    action: newrelic.ingest.sendLogs
+    version: 1
+    inputs:
+      logs:
+        - message: >-
+            shop_api_error_rollback started. Issue: ${{ .workflowInputs.issueId }}
+          attributes:
+            workflow: shop_api_error_rollback
+            app: wfa-shop-api
+    next: end

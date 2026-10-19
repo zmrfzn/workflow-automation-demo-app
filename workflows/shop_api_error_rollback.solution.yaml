@@ -1,0 +1,118 @@
+# Reference solution for challenge 04 (what the learner builds in the canvas).
+# CONTROLLER_URL and ROLLBACK_TOKEN are placeholders: ./lab/controller-url.sh prints both values.
+# Step names and inputs follow the proven demo workflow; output paths marked UNVERIFIED need a live run.
+name: shop_api_error_rollback
+description: Roll back wfa-shop-api when its error rate is high.
+workflowInputs:
+  accountId:
+    type: Int
+    required: false
+  issueId:
+    type: String
+    required: false
+  controllerUrl:
+    type: String
+    defaultValue: CONTROLLER_URL
+  rollbackToken:
+    type: String
+    defaultValue: ROLLBACK_TOKEN
+steps:
+  - name: logStart
+    type: action
+    action: newrelic.ingest.sendLogs
+    version: 1
+    inputs:
+      logs:
+        - message: >-
+            shop_api_error_rollback started. Issue: ${{ .workflowInputs.issueId }}
+          attributes:
+            workflow: shop_api_error_rollback
+            app: wfa-shop-api
+    next: verifyErrorRate
+
+  # Confirm the problem is still real before acting on it.
+  - name: verifyErrorRate
+    type: action
+    action: newrelic.nrdb.query
+    version: 1
+    inputs:
+      query: >-
+        SELECT percentage(count(*), WHERE error IS true) AS errorRate
+        FROM Transaction WHERE appName = 'wfa-shop-api' SINCE 5 minutes ago
+    next: decide
+
+  # UNVERIFIED: shape of nrdb.query outputs (results[0].errorRate).
+  - name: decide
+    type: switch
+    switch:
+      - condition: ${{ .steps.verifyErrorRate.outputs.results[0].errorRate > 20 }}
+        next: logRollback
+    next: logHealthy
+
+  - name: logHealthy
+    type: action
+    action: newrelic.ingest.sendLogs
+    version: 1
+    inputs:
+      logs:
+        - message: wfa-shop-api error rate is below 20 percent. No rollback needed.
+          attributes:
+            workflow: shop_api_error_rollback
+    next: end
+
+  - name: logRollback
+    type: action
+    action: newrelic.ingest.sendLogs
+    version: 1
+    inputs:
+      logs:
+        - message: wfa-shop-api error rate is above 20 percent. Requesting a rollback.
+          attributes:
+            workflow: shop_api_error_rollback
+    next: triggerRollback
+
+  - name: triggerRollback
+    type: action
+    action: http.post
+    version: 1
+    inputs:
+      url: ${{ .workflowInputs.controllerUrl }}/rollback
+      headers:
+        Content-Type: application/json
+        X-Rollback-Token: ${{ .workflowInputs.rollbackToken }}
+      body: >-
+        {"reason":"error rate above 20 percent","triggered_by":"newrelic-workflow-automation"}
+    next: checkRollback
+
+  - name: checkRollback
+    type: switch
+    switch:
+      - condition: ${{ .steps.triggerRollback.outputs.success == true }}
+        next: logResult
+    next: logFailure
+
+  - name: logResult
+    type: action
+    action: newrelic.ingest.sendLogs
+    version: 1
+    inputs:
+      logs:
+        - message: >-
+            Rollback finished. HTTP ${{ .steps.triggerRollback.outputs.statusCode }}.
+            Response: ${{ .steps.triggerRollback.outputs.responseBody }}
+          attributes:
+            workflow: shop_api_error_rollback
+    next: end
+
+  - name: logFailure
+    type: action
+    action: newrelic.ingest.sendLogs
+    version: 1
+    inputs:
+      logs:
+        - message: >-
+            Rollback request failed. HTTP ${{ .steps.triggerRollback.outputs.statusCode }}.
+            Check the controller URL and token.
+          attributes:
+            workflow: shop_api_error_rollback
+    next: end

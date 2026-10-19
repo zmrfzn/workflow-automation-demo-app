@@ -59,7 +59,8 @@ python3 -m venv .venv && .venv/bin/pip install flask redis requests
 `lab/` is what a learner runs on the Instruqt VM: `wire-credentials.sh` (writes `.env`),
 `install-agents.sh` (guided New Relic install, interactive), `start.sh` (stack up, wait for health), `stop.sh`
 (stops `loadgen` only, to pause traffic between challenges; `start.sh` resumes it), `debug.sh` (status, plus `restart [service]`, `reset`
-and `logs [service]`), and the optional `install-redis-integration.sh` (`nri-redis` for the Redis container; Redis is not needed by the lab).
+and `logs [service]`), `wfa_bootstrap.py` (NerdGraph find-or-create for the alert policy, conditions, email and Workflow
+Automation destinations and channels, and the alert Workflow; `--dry-run` prints the mutations), and the optional `install-redis-integration.sh` (`nri-redis` for the Redis container; Redis is not needed by the lab).
 The APM agent ships inside the `shop-api`, `controller` and `loadgen` images, each as its own application
 (`wfa-shop-api`, `wfa-controller`, `wfa-loadgen`, the same as the container names), and starts when a license key is set.
 The names are literals in `docker-compose.yml`, not read from `.env`.
