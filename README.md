@@ -57,8 +57,9 @@ python3 -m venv .venv && .venv/bin/pip install flask redis requests
 ## Lab helpers
 
 `lab/` is what a learner runs on the Instruqt VM: `wire-credentials.sh` (writes `.env`),
-`install-agents.sh` (guided New Relic install, interactive), `start.sh` (stack up, wait for health), and
-the optional `install-redis-integration.sh` (`nri-redis` for the Redis container; Redis is not needed by the lab).
+`install-agents.sh` (guided New Relic install, interactive), `start.sh` (stack up, wait for health), `stop.sh`
+(stops `loadgen` only, to pause traffic between challenges; `start.sh` resumes it), `debug.sh` (status, plus `restart [service]`, `reset`
+and `logs [service]`), and the optional `install-redis-integration.sh` (`nri-redis` for the Redis container; Redis is not needed by the lab).
 The APM agent ships inside the `shop-api`, `controller` and `loadgen` images, each as its own application
 (`workflow-automation-app`, `-controller`, `-loadgen`), and starts when a license key is set.
 
