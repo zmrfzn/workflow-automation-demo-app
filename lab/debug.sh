@@ -28,7 +28,6 @@ status() {
       val=$(env_value "$var")
       if [ -n "$val" ]; then ok "$var is set (...${val: -4})"; else bad "$var is empty"; fi
     done
-    info "APM app name: $(env_value NEW_RELIC_APP_NAME)"
   else
     bad ".env is missing. Run ./lab/wire-credentials.sh"
   fi
@@ -54,7 +53,7 @@ status() {
   echo
   echo "New Relic"
   if systemctl is-active --quiet newrelic-infra 2>/dev/null; then ok "infrastructure agent is running"; else bad "infrastructure agent is not running. Run ./lab/install-agents.sh"; fi
-  info "expected APM apps: workflow-automation-app, workflow-automation-controller, workflow-automation-loadgen"
+  info "expected APM apps: wfa-shop-api, wfa-controller, wfa-loadgen"
 
   echo
   echo "Memory"

@@ -15,8 +15,14 @@ change there.
   `ROLLBACK_SECRET` is empty. It mounts the Docker socket, so keep it narrow.
 - **Idempotent actions.** Repeating a rollback returns `noop:true, verified:true`.
 - **One controller worker.** The action lock and history are in process memory.
-- **Canonical APM app name:** `workflow-automation-app`, in compose, the entrypoint, the
-  controller, and the lab's Terraform and checks.
+- **Canonical APM app names:** `wfa-shop-api`, `wfa-controller`, `wfa-loadgen`, identical to
+  the container names. Literals in compose (no `${...}` interpolation, never from `.env`),
+  matched by the entrypoint defaults, the controller's `TARGET_APP_NAME`, and the lab's
+  Terraform and checks. GHCR image names (`workflow-automation-app:v1` etc.) are package
+  names and stay.
+- **`compose_up` passes a minimal env** (`PATH`, `HOME`, `DOCKER_*`, `APP_TAG`), never
+  `os.environ`: shell vars beat `.env` in compose interpolation, and the controller's own
+  `NEW_RELIC_APP_NAME` once leaked into every `shop-api` it recreated.
 - **No credentials in git.** `.env` is ignored. Only `.env.example` is tracked.
   Never copy files from the older `workflow-app-testing` repo's `infra/` or `.env`.
 - Stage by explicit path. Commits carry no co-author or attribution trailer.

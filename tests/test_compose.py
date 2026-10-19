@@ -7,9 +7,9 @@ import yaml
 COMPOSE = os.path.join(os.path.dirname(__file__), "..", "docker-compose.yml")
 
 EXPECTED = {
-    "shop-api": "workflow-automation-app",
-    "controller": "workflow-automation-controller",
-    "loadgen": "workflow-automation-loadgen",
+    "shop-api": "wfa-shop-api",
+    "controller": "wfa-controller",
+    "loadgen": "wfa-loadgen",
 }
 
 
@@ -25,9 +25,14 @@ class ComposeWiring(unittest.TestCase):
 
     def test_each_service_has_its_own_app_name(self):
         for name, app_name in EXPECTED.items():
-            value = env_of(self.services[name])["NEW_RELIC_APP_NAME"]
-            # shop-api reads its name from .env with a default; the sidecars are fixed
-            self.assertIn(app_name, value, name)
+            self.assertEqual(env_of(self.services[name])["NEW_RELIC_APP_NAME"], app_name, name)
+
+    def test_app_names_are_literals(self):
+        # Interpolation let the controller's own name leak into shop-api (shell beats .env)
+        values = [env_of(self.services[n])["NEW_RELIC_APP_NAME"] for n in EXPECTED]
+        values.append(env_of(self.services["controller"])["TARGET_APP_NAME"])
+        for value in values:
+            self.assertNotIn("${", value)
 
     def test_app_names_are_distinct(self):
         names = [env_of(self.services[n])["NEW_RELIC_APP_NAME"] for n in EXPECTED]
@@ -39,7 +44,7 @@ class ComposeWiring(unittest.TestCase):
 
     def test_controller_targets_the_app_not_itself(self):
         env = env_of(self.services["controller"])
-        self.assertIn("workflow-automation-app", env["TARGET_APP_NAME"])
+        self.assertEqual(env["TARGET_APP_NAME"], EXPECTED["shop-api"])
         self.assertNotEqual(env["TARGET_APP_NAME"], env["NEW_RELIC_APP_NAME"])
 
     def test_redis_is_published_on_loopback_only(self):

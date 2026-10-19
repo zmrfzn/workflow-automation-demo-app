@@ -12,10 +12,10 @@ case "$key" in
     ;;
 esac
 
-export NEW_RELIC_APP_NAME="${NEW_RELIC_APP_NAME:-workflow-automation-app}"
+export NEW_RELIC_APP_NAME="${NEW_RELIC_APP_NAME:-wfa-shop-api}"
 export NEW_RELIC_DISTRIBUTED_TRACING_ENABLED=true
 export NEW_RELIC_APPLICATION_LOGGING_ENABLED=true
 export NEW_RELIC_APPLICATION_LOGGING_FORWARDING_ENABLED=true
 export NEW_RELIC_APPLICATION_LOGGING_METRICS_ENABLED=true
-export NEW_RELIC_LABELS="release:${APP_RELEASE:-v1}"
+export NEW_RELIC_LABELS="project:wfa;role:shop-api;release:${APP_RELEASE:-v1}"
 exec newrelic-admin run-program $GUNICORN

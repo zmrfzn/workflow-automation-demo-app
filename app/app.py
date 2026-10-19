@@ -17,7 +17,7 @@ except ImportError:  # local runs without the agent installed
     nr_agent = None
 
 RELEASE = os.environ.get("APP_RELEASE", "v1")
-APP_NAME = os.environ.get("NEW_RELIC_APP_NAME", "workflow-automation-app")
+APP_NAME = os.environ.get("NEW_RELIC_APP_NAME", "wfa-shop-api")
 
 if RELEASE == "v2":
     from releases import v2 as release

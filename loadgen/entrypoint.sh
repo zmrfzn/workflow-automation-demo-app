@@ -10,7 +10,7 @@ case "$key" in
     ;;
 esac
 
-export NEW_RELIC_APP_NAME="${NEW_RELIC_APP_NAME:-workflow-automation-loadgen}"
+export NEW_RELIC_APP_NAME="${NEW_RELIC_APP_NAME:-wfa-loadgen}"
 export NEW_RELIC_DISTRIBUTED_TRACING_ENABLED=true
 export NEW_RELIC_LABELS="project:wfa;role:loadgen"
 exec newrelic-admin run-program python loadgen.py

@@ -61,7 +61,8 @@ python3 -m venv .venv && .venv/bin/pip install flask redis requests
 (stops `loadgen` only, to pause traffic between challenges; `start.sh` resumes it), `debug.sh` (status, plus `restart [service]`, `reset`
 and `logs [service]`), and the optional `install-redis-integration.sh` (`nri-redis` for the Redis container; Redis is not needed by the lab).
 The APM agent ships inside the `shop-api`, `controller` and `loadgen` images, each as its own application
-(`workflow-automation-app`, `-controller`, `-loadgen`), and starts when a license key is set.
+(`wfa-shop-api`, `wfa-controller`, `wfa-loadgen`, the same as the container names), and starts when a license key is set.
+The names are literals in `docker-compose.yml`, not read from `.env`.
 
 ## Publishing
 

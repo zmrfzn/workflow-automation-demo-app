@@ -13,7 +13,7 @@ case "$key" in
     ;;
 esac
 
-export NEW_RELIC_APP_NAME="${NEW_RELIC_APP_NAME:-workflow-automation-controller}"
+export NEW_RELIC_APP_NAME="${NEW_RELIC_APP_NAME:-wfa-controller}"
 export NEW_RELIC_DISTRIBUTED_TRACING_ENABLED=true
 export NEW_RELIC_APPLICATION_LOGGING_ENABLED=true
 export NEW_RELIC_APPLICATION_LOGGING_FORWARDING_ENABLED=true

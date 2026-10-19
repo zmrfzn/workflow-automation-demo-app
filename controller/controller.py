@@ -28,7 +28,7 @@ COMPOSE_DIR = os.environ.get("COMPOSE_DIR", "/workspace")
 APP_URL = os.environ.get("APP_URL", "http://shop-api:5000")
 # The app whose change-tracking markers we write. Deliberately NOT NEW_RELIC_APP_NAME, which names
 # this controller's own APM entity.
-TARGET_APP_NAME = os.environ.get("TARGET_APP_NAME", "workflow-automation-app")
+TARGET_APP_NAME = os.environ.get("TARGET_APP_NAME", "wfa-shop-api")
 NERDGRAPH = "https://api.newrelic.com/graphql"
 HEALTH_TIMEOUT = int(os.environ.get("HEALTH_TIMEOUT", "60"))
 
@@ -54,7 +54,10 @@ def token():
 
 def compose_up(version):
     """Recreate shop-api from the requested release image."""
-    env = {**os.environ, "APP_TAG": version}
+    # Minimal env, never os.environ: shell vars beat .env in compose interpolation, so this
+    # process's own NEW_RELIC_* settings would leak into shop-api. Compose reads /workspace/.env.
+    env = {k: v for k, v in os.environ.items() if k in ("PATH", "HOME") or k.startswith("DOCKER_")}
+    env["APP_TAG"] = version
     subprocess.run(
         ["docker", "compose", "-p", PROJECT, "--project-directory", COMPOSE_DIR,
          "up", "-d", "--no-deps", "--force-recreate", SERVICE],

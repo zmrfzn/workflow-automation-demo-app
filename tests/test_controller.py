@@ -115,6 +115,15 @@ class ControllerTests(unittest.TestCase):
         self.assertEqual(args[0][-1], "shop-api")
         self.assertEqual(kwargs["env"]["APP_TAG"], "v1")
 
+    def test_compose_env_does_not_leak_the_controller_app_name(self):
+        with mock.patch.dict(os.environ, {"NEW_RELIC_APP_NAME": "wfa-controller"}), \
+                mock.patch("subprocess.run") as run:
+            REAL_COMPOSE_UP("v2")
+        env = run.call_args.kwargs["env"]
+        # Check the key only: a failing assertNotIn would print the whole environment, tokens included.
+        self.assertFalse("NEW_RELIC_APP_NAME" in env, "NEW_RELIC_APP_NAME leaked into compose env")
+        self.assertEqual(env["APP_TAG"], "v2")
+
 
 if __name__ == "__main__":
     unittest.main()
