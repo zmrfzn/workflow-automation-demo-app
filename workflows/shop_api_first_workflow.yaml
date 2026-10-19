@@ -1,0 +1,26 @@
+# Trial definition for challenge 03: one step that writes a log line.
+# Deploy: ./lab/wfa_bootstrap.py definition --file workflows/shop_api_first_workflow.yaml
+# or paste it into the Workflow Automation editor in YAML mode.
+# Challenge 04 builds the real one, shop_api_error_rollback, as a separate workflow.
+name: shop_api_first_workflow
+description: First lab workflow that writes one log line
+workflowInputs:
+  accountId:
+    type: Int
+    required: false
+  issueId:
+    type: String
+    required: false
+steps:
+  - name: logStart
+    type: action
+    action: newrelic.ingest.sendLogs
+    version: 1
+    inputs:
+      logs:
+        - message: >-
+            shop_api_first_workflow started. Issue: ${{ .workflowInputs.issueId }}
+          attributes:
+            workflow: shop_api_first_workflow
+            app: wfa-shop-api
+    next: end
