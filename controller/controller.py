@@ -138,19 +138,23 @@ def entity_guid():
     return _guid_cache["guid"]
 
 
-def fire_marker(version, description):
-    """Best effort New Relic change-tracking marker. Never blocks remediation."""
+def fire_marker(version, description, user):
+    """Best effort New Relic change-tracking marker. Never blocks remediation.
+
+    `user` is the caller's triggered_by, so Change tracking shows who moved the release:
+    learner, newrelic-workflow-automation, reset."""
     if not os.environ.get("NEW_RELIC_API_KEY"):
         return {"skipped": True, "reason": "NEW_RELIC_API_KEY not set"}
     try:
         data = nerdgraph(
-            """mutation($guid: EntityGuid!, $version: String!, $description: String!) {
+            """mutation($guid: EntityGuid!, $version: String!, $description: String!, $user: String) {
                  changeTrackingCreateDeployment(deployment: {
                    entityGuid: $guid, version: $version, description: $description,
-                   deploymentType: BASIC, user: "workflow-automation"
+                   deploymentType: BASIC, user: $user
                  }) { deploymentId }
                }""",
-            {"guid": entity_guid(), "version": version, "description": description})
+            {"guid": entity_guid(), "version": version, "description": description,
+             "user": user or "controller"})
         return {"skipped": False, "deployment_id": data["changeTrackingCreateDeployment"]["deploymentId"]}
     except Exception as e:
         log_event(event="marker_failed", error=str(e))
@@ -181,7 +185,7 @@ def switch(target, action, reason="", triggered_by=""):
                 compose_up(target)
                 ok = wait_for(target)
                 after = get_version()
-                marker = fire_marker(target, f"{action}: {before} -> {target}") if ok else \
+                marker = fire_marker(target, f"{action}: {before} -> {target}", triggered_by) if ok else \
                     {"skipped": True, "reason": "release did not become healthy"}
                 payload.update(status="ok" if ok else "failed", version_after=after,
                                verified=bool(ok and after == target), noop=False, nr_marker=marker)

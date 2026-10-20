@@ -60,6 +60,21 @@ class ControllerTests(unittest.TestCase):
         self.assertEqual(self.cluster.ups, ["v1"])
         self.assertTrue(body["nr_marker"]["skipped"])  # no API key in tests
 
+    def test_marker_records_who_triggered_the_change(self):
+        sent = {}
+
+        def fake_nerdgraph(query, variables):
+            sent.update(variables)
+            return {"changeTrackingCreateDeployment": {"deploymentId": "d1"}}
+
+        with mock.patch.dict(os.environ, {"NEW_RELIC_API_KEY": "NRAK-TEST"}), \
+                mock.patch.object(controller, "nerdgraph", fake_nerdgraph), \
+                mock.patch.object(controller, "entity_guid", lambda: "GUID"):
+            controller.fire_marker("v1", "rollback: v2 -> v1", "newrelic-workflow-automation")
+            self.assertEqual(sent["user"], "newrelic-workflow-automation")
+            controller.fire_marker("v2", "deploy: v1 -> v2", "")
+            self.assertEqual(sent["user"], "controller")
+
     def test_rollback_is_idempotent(self):
         self.client.post("/rollback", headers=AUTH)
         body = self.client.post("/rollback", headers=AUTH).get_json()
