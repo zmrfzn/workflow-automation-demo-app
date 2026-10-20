@@ -407,7 +407,9 @@ def ensure_workflow(key, account, args, policy_id, channel_ids):
             "mutingRulesHandling": "DONT_NOTIFY_FULLY_MUTED_ISSUES",
             "issuesFilter": {"name": "policy", "type": "FILTER", "predicates": [
                 {"attribute": "labels.policyIds", "operator": "EXACTLY_MATCHES", "values": [str(policy_id)]}]},
-            "destinationConfigurations": [{"channelId": c} for c in channel_ids],
+            # Acknowledge is a manual fallback: acknowledging the issue starts the workflow again.
+            "destinationConfigurations": [{"channelId": c, "notificationTriggers": ["ACTIVATED", "ACKNOWLEDGED"]}
+                                          for c in channel_ids],
         }}, ["aiWorkflowsCreateWorkflow", "workflow"], hint="already in use",
         hint_text="A channel can belong to only one alert workflow. Pass a different --email-channel, "
                   "or delete the alert workflow that holds it")

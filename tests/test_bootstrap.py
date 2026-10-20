@@ -94,6 +94,8 @@ class BootstrapTests(unittest.TestCase):
         wf = self.fake.workflow_input
         self.assertEqual(wf["issuesFilter"]["predicates"][0]["values"], ["p1"])
         self.assertEqual(len(wf["destinationConfigurations"]), 2)
+        for dc in wf["destinationConfigurations"]:
+            self.assertEqual(dc["notificationTriggers"], ["ACTIVATED", "ACKNOWLEDGED"])
 
     def test_rerun_creates_nothing(self):
         self.run_cli("workflow", "--email", "a@example.com", "--definition-version", "1")
