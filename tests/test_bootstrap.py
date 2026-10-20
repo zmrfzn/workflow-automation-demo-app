@@ -70,7 +70,7 @@ class FakeAccount:
 class BootstrapTests(unittest.TestCase):
     def setUp(self):
         self.fake = FakeAccount()
-        env = {"NEW_RELIC_API_KEY": "NRAK-TEST", "NEW_RELIC_ACCOUNT_ID": "8081107"}
+        env = {"NEW_RELIC_API_KEY": "NRAK-TEST", "NEW_RELIC_ACCOUNT_ID": "1234567"}
         self.patches = [mock.patch.object(wb, "nerdgraph", self.fake),
                         mock.patch.object(wb, "load_env", lambda: None),
                         mock.patch.dict(os.environ, env)]

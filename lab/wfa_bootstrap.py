@@ -41,7 +41,7 @@ DEFAULTS = {
     "definition": "shop_api_error_rollback",
 }
 
-# Thresholds from live data, account 8081107, 2026-10-19 (3-minute buckets):
+# Thresholds from live data on the test account, 2026-10-19 (3-minute buckets):
 #   error rate  v1 0%,      v2 21 to 56%
 #   p95         v1 ~5 ms,   v2 3.8 to 4.4 s
 #   cache miss  v1 5%,      v2 100% (on /api/products)
