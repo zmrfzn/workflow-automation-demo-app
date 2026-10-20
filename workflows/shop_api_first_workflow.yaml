@@ -8,9 +8,6 @@ workflowInputs:
   accountId:
     type: Int
     required: false
-  issueId:
-    type: String
-    required: false
 steps:
   - name: logStart
     type: action
@@ -19,7 +16,7 @@ steps:
     inputs:
       logs:
         - message: >-
-            shop_api_first_workflow started. Issue: ${{ .workflowInputs.issueId }}
+            shop_api_first_workflow started. Account: ${{ .workflowInputs.accountId }}
           attributes:
             workflow: shop_api_first_workflow
             app: wfa-shop-api
