@@ -27,9 +27,11 @@ steps:
             app: wfa-shop-api
     next: verifyErrorRate
 
-  # Confirm the problem is still real before acting on it. The rate covers only the release that is
-  # live now (every transaction carries app.release), so right after a rollback v2's errors no longer
-  # count and a second trigger, for example a second issue, takes the healthy path.
+  # Confirm the problem is still real before acting on it. The rate covers only the release from the
+  # latest deployment marker (the controller writes one on every deploy, rollback and reset; markers
+  # land faster than transaction data). Every transaction carries app.release, so right after a
+  # rollback v2's errors no longer count and a second trigger, for example a second issue, takes the
+  # healthy path.
   - name: verifyErrorRate
     type: action
     action: newrelic.nrdb.query
@@ -38,7 +40,7 @@ steps:
       query: >-
         SELECT percentage(count(*), WHERE error IS true) AS errorRate, latest(app.release) AS release
         FROM Transaction WHERE appName = 'wfa-shop-api'
-        AND app.release IN (SELECT latest(app.release) FROM Transaction WHERE appName = 'wfa-shop-api' SINCE 1 minute ago)
+        AND app.release IN (FROM Deployment SELECT latest(version) WHERE entity.name = 'wfa-shop-api' SINCE 1 day ago)
         SINCE 5 minutes ago
     next: decide
 
