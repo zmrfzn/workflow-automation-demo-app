@@ -67,5 +67,22 @@ services:
     mem_limit: 192m
     restart: unless-stopped
 
+  # HTTPS on 5443 for Workflow Automation. Needs the Instruqt certificate, so it sits behind the
+  # `tls` profile: lab/start.sh turns the profile on only when /etc/ssl/certs/sandbox.crt exists.
+  tls:
+    image: nginx:1.27-alpine
+    container_name: wfa-tls
+    profiles: ["tls"]
+    ports:
+      - "5443:5443"
+    volumes:
+      - ./tls/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - /etc/ssl/certs/sandbox.crt:/certs/sandbox.crt:ro
+      - /etc/ssl/private/sandbox.key:/certs/sandbox.key:ro
+    depends_on:
+      - controller
+    mem_limit: 32m
+    restart: unless-stopped
+
 volumes:
   controller-data:

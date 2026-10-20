@@ -51,6 +51,14 @@ class ComposeWiring(unittest.TestCase):
         ports = self.services["redis"].get("ports", [])
         self.assertTrue(ports and all(str(p).startswith("127.0.0.1:") for p in ports), ports)
 
+    def test_tls_proxies_to_the_controller_and_is_opt_in(self):
+        tls = self.services["tls"]
+        self.assertEqual(tls["profiles"], ["tls"])  # no certificate locally, so never on by default
+        self.assertIn("5443:5443", tls["ports"])
+        conf = os.path.join(os.path.dirname(COMPOSE), "tls", "nginx.conf")
+        with open(conf) as f:
+            self.assertIn("proxy_pass http://controller:5001;", f.read())
+
 
 if __name__ == "__main__":
     unittest.main()
