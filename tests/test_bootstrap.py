@@ -14,6 +14,8 @@ class FakeAccount:
     def __init__(self):
         self.policies, self.conditions, self.destinations, self.channels, self.workflows = {}, {}, {}, {}, {}
         self.mutations = []
+        self.channel_props = {}
+        self.workflow_inputs = []
 
     def __call__(self, key, query, variables=None):
         v = variables or {}
@@ -32,7 +34,9 @@ class FakeAccount:
                 {"id": i, "name": n} for n, i in self.destinations.items() if n == v["name"]]}}
         elif "channels(" in query:
             account["aiNotifications"] = {"channels": {"entities": [
-                {"id": i, "name": n} for n, i in self.channels.items() if n == v["name"]]}}
+                {"id": i, "name": n, "createdAt": f"2026-10-20T00:00:{k:02d}Z",
+                 "properties": self.channel_props.get(n, [])}
+                for k, (n, i) in enumerate(self.channels.items()) if v.get("name") in (None, n)]}}
         elif "workflows(" in query:
             account["aiWorkflows"] = {"workflows": {"entities": [
                 {"id": i, "name": n} for n, i in self.workflows.items() if n == v["name"]]}}
@@ -53,9 +57,11 @@ class FakeAccount:
         if "aiNotificationsCreateChannel" in query:
             cid = f"ch{len(self.channels) + 1}"
             self.channels[v["channel"]["name"]] = cid
+            self.channel_props[v["channel"]["name"]] = v["channel"]["properties"]
             return {"aiNotificationsCreateChannel": {"channel": {"id": cid}, "errors": []}}
         if "aiWorkflowsCreateWorkflow" in query:
             self.workflow_input = v["workflow"]
+            self.workflow_inputs.append(v["workflow"])
             self.workflows[v["workflow"]["name"]] = "w1"
             return {"aiWorkflowsCreateWorkflow": {"workflow": {"id": "w1"}, "errors": []}}
         raise AssertionError("unexpected mutation")
@@ -80,7 +86,7 @@ class BootstrapTests(unittest.TestCase):
             return wb.main(list(argv))
 
     def test_workflow_creates_the_whole_chain(self):
-        self.assertEqual(self.run_cli("workflow", "--email", "a@example.com"), 0)
+        self.assertEqual(self.run_cli("workflow", "--email", "a@example.com", "--definition-version", "1"), 0)
         self.assertEqual(len(self.fake.policies), 1)
         self.assertEqual(set(self.fake.conditions), {"Shop API - High Error Rate", "Shop API - High Latency"})
         self.assertEqual(len(self.fake.destinations), 2)
@@ -90,7 +96,7 @@ class BootstrapTests(unittest.TestCase):
         self.assertEqual(len(wf["destinationConfigurations"]), 2)
 
     def test_rerun_creates_nothing(self):
-        self.run_cli("workflow", "--email", "a@example.com")
+        self.run_cli("workflow", "--email", "a@example.com", "--definition-version", "1")
         before = len(self.fake.mutations)
         self.assertEqual(self.run_cli("workflow", "--email", "a@example.com"), 0)
         self.assertEqual(len(self.fake.mutations), before)
@@ -98,6 +104,34 @@ class BootstrapTests(unittest.TestCase):
     def test_email_only_routes_to_one_channel(self):
         self.run_cli("workflow", "--email", "a@example.com", "--email-only")
         self.assertEqual(len(self.fake.workflow_input["destinationConfigurations"]), 1)
+
+    def test_each_alert_workflow_gets_its_own_email_channel(self):
+        self.run_cli("workflow", "--email-only", "--email", "a@example.com",
+                     "--policy", "Challenge 2 - Baseline", "--workflow", "Challenge 2 - Email Alerts")
+        self.run_cli("workflow", "--email-only", "--policy", "Challenge 5", "--workflow", "Challenge 5")
+        first, second = (w["destinationConfigurations"][0]["channelId"] for w in self.fake.workflow_inputs)
+        self.assertNotEqual(first, second)
+        self.assertIn("Challenge 2 - Email Alerts - Email", self.fake.channels)
+        self.assertEqual(len(self.fake.destinations), 1)
+
+    def test_workflow_reuses_the_newest_challenge_04_channel(self):
+        self.run_cli("channel", "--definition-version", "1")
+        self.run_cli("channel", "--definition-version", "2")
+        self.assertEqual(self.run_cli("workflow", "--email", "a@example.com",
+                                      "--policy", "Challenge 5", "--workflow", "Challenge 5"), 0)
+        ids = [c["channelId"] for c in self.fake.workflow_input["destinationConfigurations"]]
+        self.assertIn(self.fake.channels["Lab - Remediation Channel v2"], ids)
+        self.assertEqual(len([n for n in self.fake.channels if n.startswith("Lab - Remediation")]), 2)
+
+    def test_workflow_without_a_channel_points_to_challenge_04(self):
+        with mock.patch("sys.stderr"):
+            self.assertEqual(self.run_cli("workflow", "--email", "a@example.com"), 1)
+        self.assertNotIn("aiWorkflowsCreateWorkflow", "".join(self.fake.mutations))
+
+    def test_channel_needs_no_email(self):
+        self.assertEqual(self.run_cli("channel", "--definition-version", "3"), 0)
+        self.assertIn("Lab - Remediation Channel v3", self.fake.channels)
+        self.assertEqual(self.fake.channel_props["Lab - Remediation Channel v3"][1]["value"], "3")
 
     def test_conditions_target_the_shop_api_by_name(self):
         for spec in wb.CONDITIONS.values():

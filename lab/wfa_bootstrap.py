@@ -7,14 +7,18 @@ Every step is find-or-create by name, so re-running is safe and check scripts ca
   policy       alert policy plus the shop-api NRQL conditions
   destination  email destination and Workflow Automation destination
   definition   upload a Workflow Automation definition from a YAML file
-  channel      email channel and Workflow Automation channel (bound to a definition)
-  workflow     alert Workflow: issues from the policy -> both channels
+  channel      Workflow Automation channel, bound to one version of a definition (challenge 04)
+  workflow     alert Workflow: issues from the policy -> its own email channel, plus the
+               Workflow Automation channel that `channel` created (unless --email-only)
   all          policy, destination, [definition], channel, workflow
   status       read-only: which pieces exist
 
 Credentials come from the environment or ../.env: NEW_RELIC_API_KEY, NEW_RELIC_ACCOUNT_ID.
 --dry-run prints each mutation's variables (API key masked) and changes nothing.
 Standard library only. No prompts: a missing value is an error, so it is safe in setup scripts.
+
+A notification channel can belong to only one alert Workflow, so each alert Workflow gets its own
+email channel, named after it. Destinations are shared.
 """
 import argparse
 import base64
@@ -32,7 +36,6 @@ DEFAULTS = {
     "policy": "Workflow Automation - Shop API",
     "email_destination": "Lab - Email",
     "wfa_destination": "Lab - Workflow Automation",
-    "email_channel": "Lab - Email Channel",
     "wfa_channel": "Lab - Remediation Channel",
     "workflow": "Shop API - Auto-Remediation",
     "definition": "shop_api_error_rollback",
@@ -121,7 +124,7 @@ def nerdgraph(key, query, variables=None):
     return body["data"]
 
 
-def mutate(key, label, query, variables, path):
+def mutate(key, label, query, variables, path, hint=None, hint_text=""):
     """Run a create mutation and return the object at `path`; in dry-run mode just print it."""
     if DRY_RUN:
         print(f"  [dry-run] {label}: {json.dumps(masked(variables), indent=2)}")
@@ -132,7 +135,10 @@ def mutate(key, label, query, variables, path):
         result = result[part]
     errors = result.get("errors")
     if errors:
-        raise BootstrapError(f"{label} failed: {json.dumps(errors)}")
+        message = f"{label} failed: {json.dumps(errors)}"
+        if hint and hint in message:
+            message += f"\n  {hint_text}"
+        raise BootstrapError(message)
     return result[path[-1]]
 
 
@@ -182,6 +188,22 @@ def find_notification(key, account, collection, kind, name):
         return None
     entities = acct["aiNotifications"][collection]["entities"]
     return next((e["id"] for e in entities if e["name"] == name), None)
+
+
+def find_wfa_channel(key, account, definition):
+    """The newest Workflow Automation channel bound to `definition`, as (id, name), or None."""
+    acct = account_query(key, account,
+                         "aiNotifications { channels(filters: {type: WORKFLOW_AUTOMATION}) "
+                         "{ entities { id name createdAt properties { key value } } } }")
+    if not acct:
+        return None
+    bound = [c for c in acct["aiNotifications"]["channels"]["entities"]
+             if {"key": "workflowAutomation", "value": definition} in
+             [{"key": p["key"], "value": p["value"]} for p in c.get("properties") or []]]
+    if not bound:
+        return None
+    newest = max(bound, key=lambda c: c.get("createdAt") or "")
+    return newest["id"], newest["name"]
 
 
 def find_workflow(key, account, name):
@@ -252,19 +274,30 @@ def ensure_destination(key, account, kind, name, destination):
     return created["id"]
 
 
-def ensure_destinations(key, account, args):
+def ensure_email_destination(key, account, args):
+    # The address is needed only to create the destination; an existing one is reused as is.
+    found = find_notification(key, account, "destinations", "EMAIL", args.email_destination)
+    if found:
+        report("email destination", args.email_destination, found, False)
+        return found
     if not args.email:
-        raise BootstrapError("--email (or ALERT_EMAIL) is required for the email destination")
-    email_id = ensure_destination(key, account, "EMAIL", args.email_destination,
-                                  {"properties": [{"key": "email", "value": args.email}]})
+        raise BootstrapError("--email (or ALERT_EMAIL) is required to create the email destination")
+    return ensure_destination(key, account, "EMAIL", args.email_destination,
+                              {"properties": [{"key": "email", "value": args.email}]})
+
+
+def ensure_wfa_destination(key, account, args):
     # Workflow Automation calls back into New Relic with this key. It persists in the account:
     # the learner is told in challenge 04 and cleanup removes it.
-    wfa_id = ensure_destination(key, account, "WORKFLOW_AUTOMATION", args.wfa_destination, {
+    return ensure_destination(key, account, "WORKFLOW_AUTOMATION", args.wfa_destination, {
         "properties": [],
         "auth": {"type": "CUSTOM_HEADERS",
                  "customHeaders": {"customHeaders": [{"key": "Api-Key", "value": key}]}},
     })
-    return email_id, wfa_id
+
+
+def ensure_destinations(key, account, args):
+    return ensure_email_destination(key, account, args), ensure_wfa_destination(key, account, args)
 
 
 # Workflow Automation rejects any other character in a definition's description.
@@ -324,17 +357,36 @@ def ensure_channel(key, account, kind, name, destination_id, properties):
     return created["id"]
 
 
-def ensure_channels(key, account, args, email_dest, wfa_dest):
-    email_ch = ensure_channel(key, account, "EMAIL", args.email_channel, email_dest,
-                              [{"key": "subject", "value": "{{ issueTitle }}"}])
+def ensure_email_channel(key, account, args):
+    email_dest = ensure_email_destination(key, account, args)
+    return ensure_channel(key, account, "EMAIL", args.email_channel, email_dest,
+                          [{"key": "subject", "value": "{{ issueTitle }}"}])
+
+
+def ensure_wfa_channel(key, account, args):
     # workflowAutomation must equal the definition's `name`. A canvas edit creates a new version,
     # so this pin needs a sync step later (Workplan-Bootstrap 6.2, BQ8).
-    wfa_ch = ensure_channel(key, account, "WORKFLOW_AUTOMATION", args.wfa_channel, wfa_dest, [
+    version = args.definition_version or 1
+    name = args.wfa_channel or f"{DEFAULTS['wfa_channel']} v{version}"
+    wfa_dest = ensure_wfa_destination(key, account, args)
+    return ensure_channel(key, account, "WORKFLOW_AUTOMATION", name, wfa_dest, [
         {"key": "workflowAutomation", "value": args.definition},
-        {"key": "workflowAutomationVersion", "value": str(args.definition_version)},
+        {"key": "workflowAutomationVersion", "value": str(version)},
         {"key": "workflowAutomationLogLevel", "value": "TRACE"},
     ])
-    return email_ch, wfa_ch
+
+
+def existing_wfa_channel(key, account, args):
+    """Reuse the channel challenge 04 created, so challenge 05 needs no version number."""
+    if DRY_RUN:
+        report("workflow_automation channel", f"newest bound to {args.definition}", "<lookup>", False)
+        return "<workflow_automation channel>"
+    found = find_wfa_channel(key, account, args.definition)
+    if not found:
+        raise BootstrapError(f"no Workflow Automation channel is bound to {args.definition}. "
+                             "Run `wfa_bootstrap.py channel --definition-version <N>` first (challenge 04, Step 12)")
+    report("workflow_automation channel", found[1], found[0], False)
+    return found[0]
 
 
 def ensure_workflow(key, account, args, policy_id, channel_ids):
@@ -356,7 +408,9 @@ def ensure_workflow(key, account, args, policy_id, channel_ids):
             "issuesFilter": {"name": "policy", "type": "FILTER", "predicates": [
                 {"attribute": "labels.policyIds", "operator": "EXACTLY_MATCHES", "values": [str(policy_id)]}]},
             "destinationConfigurations": [{"channelId": c} for c in channel_ids],
-        }}, ["aiWorkflowsCreateWorkflow", "workflow"])
+        }}, ["aiWorkflowsCreateWorkflow", "workflow"], hint="already in use",
+        hint_text="A channel can belong to only one alert workflow. Pass a different --email-channel, "
+                  "or delete the alert workflow that holds it")
     report("alert workflow", args.workflow, created["id"], True)
     return created["id"]
 
@@ -378,20 +432,25 @@ def cmd_definition(key, account, args):
 
 
 def cmd_channel(key, account, args):
-    email_dest, wfa_dest = ensure_destinations(key, account, args)
-    ensure_channels(key, account, args, email_dest, wfa_dest)
+    ensure_wfa_channel(key, account, args)
 
 
 def cmd_workflow(key, account, args):
     policy_id = ensure_policy(key, account, args)
-    email_dest, wfa_dest = ensure_destinations(key, account, args)
-    channels = ensure_channels(key, account, args, email_dest, wfa_dest)
-    ensure_workflow(key, account, args, policy_id, [channels[0]] if args.email_only else channels)
+    channels = [ensure_email_channel(key, account, args)]
+    if not args.email_only:
+        # An explicit version or channel name creates that channel; otherwise reuse challenge 04's.
+        if args.definition_version or args.wfa_channel:
+            channels.append(ensure_wfa_channel(key, account, args))
+        else:
+            channels.append(existing_wfa_channel(key, account, args))
+    ensure_workflow(key, account, args, policy_id, channels)
 
 
 def cmd_all(key, account, args):
     if args.file:
         ensure_definition(key, account, args.file)
+    args.definition_version = args.definition_version or 1
     cmd_workflow(key, account, args)
 
 
@@ -408,9 +467,10 @@ def cmd_status(key, account, args):
     for label, collection, kind, name in (
             ("email destination", "destinations", "EMAIL", args.email_destination),
             ("wfa destination", "destinations", "WORKFLOW_AUTOMATION", args.wfa_destination),
-            ("email channel", "channels", "EMAIL", args.email_channel),
-            ("wfa channel", "channels", "WORKFLOW_AUTOMATION", args.wfa_channel)):
+            ("email channel", "channels", "EMAIL", args.email_channel)):
         print(f"  {label:<20} {name}: {find_notification(key, account, collection, kind, name) or 'missing'}")
+    wfa = find_wfa_channel(key, account, args.definition)
+    print(f"  wfa channel          bound to {args.definition}: {f'{wfa[1]} ({wfa[0]})' if wfa else 'missing'}")
     print(f"  alert workflow       {args.workflow}: {find_workflow(key, account, args.workflow) or 'missing'}")
 
 
@@ -434,13 +494,15 @@ def parse(argv):
     p.add_argument("--email-only", action="store_true", help="alert workflow routes to email only (challenge 02)")
     p.add_argument("--email-destination", default=DEFAULTS["email_destination"])
     p.add_argument("--wfa-destination", default=DEFAULTS["wfa_destination"])
-    p.add_argument("--email-channel", default=DEFAULTS["email_channel"])
-    p.add_argument("--wfa-channel", default=DEFAULTS["wfa_channel"])
+    p.add_argument("--email-channel", help="default: '<workflow> - Email', one per alert workflow")
+    p.add_argument("--wfa-channel", help="default: 'Lab - Remediation Channel v<N>'")
     p.add_argument("--workflow", default=DEFAULTS["workflow"])
     p.add_argument("--definition", default=DEFAULTS["definition"], help="Workflow Automation definition name")
-    p.add_argument("--definition-version", type=int, default=1)
+    p.add_argument("--definition-version", type=int,
+                   help="`channel`: the version to bind (default 1). `workflow`: omit to reuse that channel")
     p.add_argument("--file", help="definition YAML for `definition` / `all`")
     args = p.parse_args(argv)
+    args.email_channel = args.email_channel or f"{args.workflow} - Email"
     unknown = [c for c in args.conditions if c not in CONDITIONS]
     if unknown:
         p.error(f"unknown condition(s): {', '.join(unknown)}")
