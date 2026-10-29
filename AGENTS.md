@@ -25,6 +25,10 @@ change there.
   `NEW_RELIC_APP_NAME` once leaked into every `shop-api` it recreated.
 - **No credentials in git.** `.env` is ignored. Only `.env.example` is tracked.
   Never copy files from the older `workflow-app-testing` repo's `infra/` or `.env`.
+- **Images are built and published by CI, never by hand.** `.github/workflows/publish.yml`
+  builds and pushes every GHCR image (app `v1`/`v2`, controller, loadgen) on push to `main`
+  or a `lab-*` tag. Do not run `docker push`; committing and pushing to `main` is the release.
+  `scripts/build-images.sh` is for local testing only.
 - Stage by explicit path. Commits carry no co-author or attribution trailer.
 
 ## Verify before claiming done
