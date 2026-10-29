@@ -5,6 +5,7 @@ its own APM application and its calls to shop-api appear as linked distributed t
 """
 import os
 import random
+import threading
 import time
 
 import requests
@@ -15,7 +16,10 @@ except ImportError:  # local runs without the agent installed
     nr_agent = None
 
 BASE = os.environ.get("TARGET_URL", "http://shop-api:5000")
-INTERVAL = float(os.environ.get("INTERVAL", "0.5"))
+INTERVAL = float(os.environ.get("INTERVAL", "0.1"))
+# Parallel workers. A failing v2 request stalls 3 to 5 seconds, so a single sequential loop
+# would send almost no traffic exactly when the error condition needs volume.
+WORKERS = int(os.environ.get("WORKERS", "6"))
 ENDPOINTS = ["/api/orders", "/api/inventory", "/api/users", "/api/checkout",
              "/api/data", "/api/products"]
 
@@ -36,15 +40,27 @@ def hit(path):
         return 0
 
 
-def main():
-    sent = errors = 0
+_lock = threading.Lock()
+_sent = _errors = 0
+
+
+def worker():
+    global _sent, _errors
     while True:
         status = hit(random.choice(ENDPOINTS))
-        sent += 1
-        errors += status == 0 or status >= 500
-        if sent % 50 == 0:
-            print(f"sent={sent} errors={errors}", flush=True)
-        time.sleep(INTERVAL)
+        bad = status == 0 or status >= 500
+        with _lock:
+            _sent += 1
+            _errors += bad
+            if _sent % 100 == 0:
+                print(f"sent={_sent} errors={_errors}", flush=True)
+        time.sleep(random.uniform(0, INTERVAL * 2))
+
+
+def main():
+    for _ in range(WORKERS - 1):
+        threading.Thread(target=worker, daemon=True).start()
+    worker()
 
 
 if __name__ == "__main__":

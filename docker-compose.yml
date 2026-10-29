@@ -30,7 +30,8 @@ services:
     container_name: wfa-loadgen
     environment:
       - TARGET_URL=http://shop-api:5000
-      - INTERVAL=${LOAD_INTERVAL:-0.5}
+      - INTERVAL=${LOAD_INTERVAL:-0.1}
+      - WORKERS=${LOAD_WORKERS:-6}
       - NEW_RELIC_LICENSE_KEY=${NEW_RELIC_LICENSE_KEY:-}
       - NEW_RELIC_APP_NAME=wfa-loadgen
     depends_on:
