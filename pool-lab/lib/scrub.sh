@@ -227,13 +227,16 @@ scrub_account() {
   name=$(jq -r --arg id "$id" '[.[] | select((.id | tostring) == $id)] | first | .name // empty' <<<"$accounts")
   re="^${LAB_ACCOUNT_PREFIX} [0-9]+\$"
   if [[ -z "$name" ]] || ! [[ "$name" =~ $re ]]; then
+    checkpoint_fail SCRUB "refused account ${id}: not a lab account"
     print_err "scrub: refusing account ${id} ('${name:-not visible to this key}'): only '${LAB_ACCOUNT_PREFIX} NN' lab accounts are scrubbed"
     return 1
   fi
   echo "  scrubbing '${name}' (id ${id})$([[ "${DRY_RUN:-0}" == 1 ]] && echo ', dry run')"
+  checkpoint SCRUB "start: '${name}' (id ${id})$([[ "${DRY_RUN:-0}" == 1 ]] && echo ', dry run')"
   v=$(jq -c -n --argjson a "$id" '{a: $a}')
 
   # 1. Workflow Automation: schedules, then definitions (account scope only)
+  checkpoint "SCRUB 1/6" "Workflow Automation schedules and definitions"
   list=$(_scrub_list 'query($a: Int!) { actor { account(id: $a) { workflowAutomation { schedules { results { schedule { id } definition { name } } } } } } }' \
     "$v" '.data.actor.account.workflowAutomation.schedules.results') && \
     list=$(jq -c '[.[] | {id: .schedule.id, name: (.definition.name // .schedule.id)}]' <<<"$list") || list=""
@@ -244,6 +247,7 @@ scrub_account() {
   _scrub_step "Workflow Automation definitions" "$list" _del_wfa_definition
 
   # 2-3. Alert workflows (and their channels), then any remaining channels and destinations
+  checkpoint "SCRUB 2/6" "alert workflows, notification channels, destinations"
   list=$(_scrub_list 'query($a: Int!, $cursor: String) { actor { account(id: $a) { aiWorkflows { workflows(cursor: $cursor) { nextCursor entities { id name } } } } } }' \
     "$v" '.data.actor.account.aiWorkflows.workflows.entities' '.data.actor.account.aiWorkflows.workflows.nextCursor') || list=""
   _scrub_step "alert workflows" "$list" _del_ai_workflow
@@ -255,6 +259,7 @@ scrub_account() {
   _scrub_step "destinations" "$list" _del_destination
 
   # 4. Muting rules, then policies (a policy delete removes its conditions)
+  checkpoint "SCRUB 3/6" "muting rules and alert policies"
   list=$(_scrub_list 'query($a: Int!) { actor { account(id: $a) { alerts { mutingRules { id name } } } } }' \
     "$v" '.data.actor.account.alerts.mutingRules') || list=""
   _scrub_step "muting rules" "$list" _del_muting_rule
@@ -263,6 +268,7 @@ scrub_account() {
   _scrub_step "alert policies" "$list" _del_policy
 
   # 5. Issues still open
+  checkpoint "SCRUB 4/6" "open issues"
   now=$(( $(date +%s) * 1000 ))
   from=$(( now - SCRUB_ISSUE_DAYS * 86400000 ))
   list=$(_scrub_list 'query($a: Int!, $from: EpochMilliseconds!, $to: EpochMilliseconds!, $cursor: String) { actor { account(id: $a) { aiIssues { issues(cursor: $cursor, filter: {states: [ACTIVATED, CREATED]}, timeWindow: {startTime: $from, endTime: $to}) { nextCursor issues { issueId } } } } } }' \
@@ -272,6 +278,7 @@ scrub_account() {
   _scrub_step "open issues" "$list" _resolve_issue
 
   # 6-7. Entities: dashboards (top level only, pages go with them), monitors, then everything else
+  checkpoint "SCRUB 5/6" "dashboards, synthetic monitors, entities"
   all=$(_scrub_list 'query($q: String!, $cursor: String) { actor { entitySearch(query: $q) { results(cursor: $cursor) { nextCursor entities { guid name type domain ... on DashboardEntityOutline { dashboardParentGuid } } } } } }' \
     "$(jq -c -n --arg q "accountId = ${id}" '{q: $q}')" \
     '.data.actor.entitySearch.results.entities' '.data.actor.entitySearch.results.nextCursor') || all=""
@@ -286,6 +293,7 @@ scrub_account() {
   fi
 
   # 8. USER keys on the account owned by pool users (never the caller's, never an instructor's)
+  checkpoint "SCRUB 6/6" "pool users' user API keys"
   me=$(jq -r '.data.actor.user.id // empty' <<<"$(gql '{"query": "{ actor { user { id } } }"}')" 2>/dev/null || true)
   pool=""
   if [[ -n "${NR_AUTH_DOMAIN_ID:-}" ]] || resolve_context >/dev/null 2>&1; then
@@ -309,8 +317,13 @@ scrub_account() {
 
   if [[ "${DRY_RUN:-0}" == 1 ]]; then
     echo "  dry run: ${SCRUB_PLANNED} object(s) would be deleted$( (( SCRUB_FAILED > 0 )) && echo ", ${SCRUB_FAILED} listing(s) failed")"
+    checkpoint_ok SCRUB "dry run done: ${SCRUB_PLANNED} object(s) would be deleted"
+  elif (( SCRUB_FAILED == 0 )); then
+    echo "  deleted ${SCRUB_DELETED} object(s), ${SCRUB_FAILED} failure(s)"
+    checkpoint_ok SCRUB "done: '${name}' is clean, ${SCRUB_DELETED} object(s) deleted"
   else
     echo "  deleted ${SCRUB_DELETED} object(s), ${SCRUB_FAILED} failure(s)"
+    checkpoint_warn SCRUB "done with ${SCRUB_FAILED} failure(s), ${SCRUB_DELETED} object(s) deleted"
   fi
   (( SCRUB_FAILED == 0 ))
 }

@@ -48,6 +48,7 @@ claim_pair() {
     fi
 
     local users groups free_users claimed_gids free_groups n_users n_groups
+    checkpoint POOL "fetching pool users ('${POOL_EMAIL_PREFIX}*') and lab groups ('${LAB_ACCOUNT_PREFIX} NN${POOL_LAB_GROUP_SUFFIX}')"
     users=$(fetch_users) || return 1
     groups=$(fetch_lab_groups) || return 1
 
@@ -60,12 +61,15 @@ claim_pair() {
             | select((.id as $id | $skip | index($id)) == null)]' <<<"$groups")
     n_users=$(jq 'length' <<<"$free_users")
     n_groups=$(jq 'length' <<<"$free_groups")
+    checkpoint_ok POOL "pool users: $(jq 'length' <<<"$users") (${n_users} free), lab groups: $(jq 'length' <<<"$groups") (${n_groups} free)"
 
     if (( n_users == 0 )); then
+      checkpoint_fail POOL "no free pool user"
       print_err "No free pool users (prefix '${POOL_EMAIL_PREFIX}'). Create more with 'provision.sh users create' or free occupied ones."
       return 1
     fi
     if (( n_groups == 0 )); then
+      checkpoint_fail POOL "no free lab group"
       print_err "No free lab groups (prefix '${LAB_ACCOUNT_PREFIX} '). Create more with 'provision.sh accounts create' or release claimed ones."
       return 1
     fi
@@ -75,9 +79,10 @@ claim_pair() {
     group=$(_pick_random "$free_groups")
     uid=$(jq -r '.id' <<<"$user")
     gid=$(jq -r '.id' <<<"$group")
-    echo "  Claiming $(jq -r '.email' <<<"$user") → $(jq -r '.name' <<<"$group")"
+    checkpoint MAP "mapping $(jq -r '.email' <<<"$user") → $(jq -r '.name' <<<"$group") (attempt ${attempt}/${max})"
 
     add_user_to_group "$uid" "$gid" || return 1
+    checkpoint VERIFY "checking nobody else claimed this user or group (${polls} polls)"
 
     # Exclusivity check: did anyone else claim our user or our group at the same time?
     local user_collision=0 group_collision=0 poll vusers u_groups g_members
@@ -99,11 +104,11 @@ claim_pair() {
       CLAIM_USER_NAME=$(jq -r '.name' <<<"$user")
       CLAIM_GROUP_ID="$gid"
       CLAIM_GROUP_NAME=$(jq -r '.name' <<<"$group")
-      print_ok "Claimed ${CLAIM_USER_EMAIL} → ${CLAIM_GROUP_NAME} (attempt ${attempt}/${max})"
+      checkpoint_ok MAP "claimed ${CLAIM_USER_EMAIL} → ${CLAIM_GROUP_NAME} (attempt ${attempt}/${max})"
       return 0
     fi
 
-    print_warn "Collision (user_collision=${user_collision}, group_collision=${group_collision}); rolling back our membership"
+    checkpoint_warn VERIFY "collision (user=${user_collision}, group=${group_collision}): rolling back and retrying"
     remove_user_from_group "$uid" "$gid" || print_warn "Rollback remove failed for ${uid}; the next attempt will skip this pair"
     if (( user_collision == 1 )); then skip_users=$(jq -c --arg id "$uid" '. + [$id]' <<<"$skip_users"); fi
     if (( group_collision == 1 )); then skip_groups=$(jq -c --arg id "$gid" '. + [$id]' <<<"$skip_groups"); fi

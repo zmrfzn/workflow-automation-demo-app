@@ -11,6 +11,27 @@ print_ok()   { echo -e "\033[1;32m✔ $1\033[0m"; }
 print_err()  { echo -e "\033[1;31m✖ $1\033[0m" >&2; }
 print_warn() { echo -e "\033[1;33m⚠ $1\033[0m"; }
 
+# ── Checkpoint logs ────────────────────────────
+# One coloured line per stage of a lab run, so a track log reads as a timeline:
+#   ▶ [pool-lab 10:41:07 +3s] CLAIM      mapping labpool+002@… → INSTRUQT_LAB 02 - ReadOnly
+# Follow a run with:  grep 'pool-lab ' /var/log/wfa-setup.log
+# Each line carries the wall clock and the seconds since the script started. NO_COLOR=1 turns
+# colour off. Never pass a secret: these lines go straight to the track log.
+POOL_LAB_T0="${POOL_LAB_T0:-$(date +%s)}"
+_checkpoint_line() { # _checkpoint_line <ansi colour> <symbol> <stage> <message>
+  local ts
+  ts="$(date +%H:%M:%S) +$(( $(date +%s) - POOL_LAB_T0 ))s"
+  if [[ -n "${NO_COLOR:-}" ]]; then
+    printf '%s [pool-lab %s] %-10s %s\n' "$2" "$ts" "$3" "$4"
+  else
+    printf '\033[%sm%s [pool-lab %s] %-10s %s\033[0m\n' "$1" "$2" "$ts" "$3" "$4"
+  fi
+}
+checkpoint()      { _checkpoint_line "1;36" "▶" "$1" "$2"; }   # a stage starts
+checkpoint_ok()   { _checkpoint_line "1;32" "✔" "$1" "$2"; }   # a stage finished
+checkpoint_warn() { _checkpoint_line "1;33" "⚠" "$1" "$2"; }   # finished with a problem, run continues
+checkpoint_fail() { _checkpoint_line "1;31" "✖" "$1" "$2"; }   # the run stops here
+
 # Every lab group is named "<account name> - ReadOnly", same convention as MARS.
 POOL_LAB_GROUP_SUFFIX=" - ReadOnly"
 

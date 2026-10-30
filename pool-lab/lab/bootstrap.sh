@@ -32,10 +32,13 @@ CURRENT_STEP="startup"
 CLAIM_HELD=0     # 1 only while a freshly made claim has not yet been fully persisted
 PAIR_REUSED=0
 
+SETUP_STAGE=0
+SETUP_STAGES=7
 section() {
   CURRENT_STEP="$*"
+  SETUP_STAGE=$(( SETUP_STAGE + 1 ))
   echo ""
-  echo "=== [$(date +%H:%M:%S)] $* ==="
+  checkpoint "SETUP ${SETUP_STAGE}/${SETUP_STAGES}" "$*"
 }
 
 # Non-fatal best-effort release of a half-finished claim so the pair is not leaked.
@@ -50,6 +53,7 @@ _release_claim() {
 
 _on_err() {
   local rc=$? line="${BASH_LINENO[0]:-?}"
+  checkpoint_fail SETUP "stopped in '${CURRENT_STEP}'"
   print_err "bootstrap failed during step '${CURRENT_STEP}' (line ${line}, exit ${rc})"
 }
 _on_exit() {
@@ -61,6 +65,7 @@ trap _on_err ERR
 trap _on_exit EXIT
 
 die() {
+  checkpoint_fail SETUP "stopped in '${CURRENT_STEP}'"
   print_err "$*"
   exit 1
 }
@@ -110,12 +115,12 @@ fi
 if [[ -z "$LAB_USER_PASSWORD" ]]; then
   print_warn "No shared pool user password available (LAB_USER_PASSWORD_SECRET unset or empty); learners will not get a password in the lab"
 fi
-echo "  NerdGraph key present"
+checkpoint_ok SECRETS "NerdGraph key present$([[ -n "$LAB_USER_PASSWORD" ]] && echo ', shared password present' || echo ', no shared password')"
 
 # ── (d) org context ───────────────────────────
 section "Resolving New Relic org context"
 resolve_context
-echo "  org=${NR_ORG_ID} auth-domain=${NR_AUTH_DOMAIN_ID}"
+checkpoint_ok CONTEXT "org=${NR_ORG_ID} auth-domain=${NR_AUTH_DOMAIN_ID}"
 
 # ── (e) user/group pair ───────────────────────
 # resolve_pair is the single seam for choosing which pool user belongs to which lab group.
@@ -139,7 +144,7 @@ resolve_pair() {
       CLAIM_GROUP_ID=$(jq -r '.group.id' <<<"$hit")
       CLAIM_GROUP_NAME=$(jq -r '.group.name' <<<"$hit")
       PAIR_REUSED=1
-      print_ok "Re-run: reusing existing claim ${CLAIM_USER_EMAIL} → ${CLAIM_GROUP_NAME}"
+      checkpoint_ok MAP "re-run: reusing existing claim ${CLAIM_USER_EMAIL} → ${CLAIM_GROUP_NAME}"
       return 0
     fi
     echo "  Previous claim (${prev_uid} / ${prev_gid}) is no longer in place, claiming a new pair"
@@ -159,6 +164,7 @@ ACCOUNT_NAME="${CLAIM_GROUP_NAME%"$POOL_LAB_GROUP_SUFFIX"}"
 if [[ "$ACCOUNT_NAME" == "$CLAIM_GROUP_NAME" || -z "$ACCOUNT_NAME" ]]; then
   die "Group '${CLAIM_GROUP_NAME}' does not end with '${POOL_LAB_GROUP_SUFFIX}', cannot derive the account name"
 fi
+checkpoint ACCOUNT "looking up account '${ACCOUNT_NAME}'"
 ACCOUNT_ID=$(account_id_by_name "$ACCOUNT_NAME")
 [[ -n "$ACCOUNT_ID" ]] \
   || die "No account named '${ACCOUNT_NAME}' is visible to the API key (group '${CLAIM_GROUP_NAME}' has no matching sub-account)"
@@ -171,10 +177,13 @@ if [[ "$(jq --arg a "$ACCOUNT_ID" '[.[] | select(.accountId != $a)] | length' <<
   print_warn "Group '${CLAIM_GROUP_NAME}' also holds grants on other accounts: the learner will see more than one account"
 fi
 echo "  learner role on account ${ACCOUNT_ID}: ${GRANT_ROLES}"
+checkpoint_ok ACCOUNT "account ${ACCOUNT_ID}, learner role ${GRANT_ROLES}"
+checkpoint LICENSE "reading the ingest license key of account ${ACCOUNT_ID}"
 LICENSE_KEY=$(license_key_for_account "$ACCOUNT_ID")
 [[ -n "$LICENSE_KEY" ]] \
   || die "No ingest license key found for account '${ACCOUNT_NAME}' (${ACCOUNT_ID}). The instructor must run 'provision.sh accounts create' for it."
 echo "  account='${ACCOUNT_NAME}' id=${ACCOUNT_ID} license key found"
+checkpoint_ok LICENSE "license key found (value not logged)"
 
 # ── (g) persist agent variables ───────────────
 section "Persisting agent variables"
@@ -189,7 +198,8 @@ agent_var_set USER_EMAIL "$CLAIM_USER_EMAIL"   # MARS-compatible names
 agent_var_set USER_NAME "$CLAIM_USER_NAME"
 agent_var_set POOL_GROUP_ID "$CLAIM_GROUP_ID"
 agent_var_set LAB_USER_PASSWORD "$LAB_USER_PASSWORD"
+checkpoint_ok VARS "11 agent variables set (account, license key, user, group, password)"
 
 CLAIM_HELD=0  # everything persisted: from here on the claim is the lab's to keep
 trap - ERR
-print_ok "pool-lab ready: user=${CLAIM_USER_EMAIL} account='${ACCOUNT_NAME}' (id ${ACCOUNT_ID}) group='${CLAIM_GROUP_NAME}'"
+checkpoint_ok READY "user=${CLAIM_USER_EMAIL} account='${ACCOUNT_NAME}' (id ${ACCOUNT_ID}) group='${CLAIM_GROUP_NAME}'"
