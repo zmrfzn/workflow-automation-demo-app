@@ -1,0 +1,30 @@
+# ─────────────────────────────────────────────
+# pool-lab: entries to add to an Instruqt track's config.yml.
+# This is a snippet, not a complete config: merge it into your existing
+# `virtualmachines:` entry and top-level `secrets:` list.
+#
+# A stock Instruqt image is enough (curl is present, bootstrap installs jq via apt-get),
+# so NO `image:` change is needed.
+#
+# Track scripts: build with `pool-lab/build-lab-scripts.sh --vm <vm-name>` and copy
+#   pool-lab/dist/setup-<vm-name>    -> <track>/track_scripts/setup-<vm-name>
+#   pool-lab/dist/cleanup-<vm-name>  -> <track>/track_scripts/cleanup-<vm-name>
+# where <vm-name> is EXACTLY the `name:` of the virtual machine below (default `lab`).
+# Instruqt runs track_scripts/setup-<vm> at track start and cleanup-<vm> at track end.
+# ─────────────────────────────────────────────
+version: "3"
+virtualmachines:
+- name: lab                        # must match the <vm-name> passed to build-lab-scripts.sh
+  # image: <leave your existing stock image as is>
+  environment:
+    # NAMES of the env vars that hold the secrets (indirection, same pattern as MARS).
+    LAB_NR_API_KEY_SECRET: NR_LAB_API_KEY            # NerdGraph USER key (Organization Manager) for the lab org
+    LAB_USER_PASSWORD_SECRET: NR_LAB_USER_PASSWORD   # shared password you set for the pool users (optional, warns if absent)
+    # Pool/account naming, must match what you passed to provision.sh.
+    POOL_EMAIL_PREFIX: "labpool+"                  # pool user emails are <prefix>NNN@<domain>
+    LAB_ACCOUNT_PREFIX: "INSTRUQT_LAB"                # sub-accounts "INSTRUQT_LAB 01", groups "INSTRUQT_LAB 01 - ReadOnly"
+    NR_REGION: "US"                                  # US or EU (selects the NerdGraph endpoint)
+    # POOL_AUTH_DOMAIN_NAME: "Default"               # optional, authentication domain of the pool users
+secrets:
+- name: NR_LAB_API_KEY
+- name: NR_LAB_USER_PASSWORD
