@@ -1,0 +1,6 @@
+.env
+dist/
+invites.json
+selenium/.venv/
+__pycache__/
+.hypergrep/
