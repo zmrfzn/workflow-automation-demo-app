@@ -34,8 +34,8 @@ services:
       - WORKERS=${LOAD_WORKERS:-6}
       - NEW_RELIC_LICENSE_KEY=${NEW_RELIC_LICENSE_KEY:-}
       - NEW_RELIC_APP_NAME=wfa-loadgen
-    depends_on:
-      - shop-api
+    # No depends_on: loadgen rides out shop-api being down, and a dependency would tie it to
+    # every shop-api recreate the controller does.
     mem_limit: 128m
     restart: unless-stopped
 
