@@ -32,6 +32,8 @@ fi
 source "$_SCRIPT_DIR/lib/common.sh"
 # shellcheck source=lib/claim.sh
 source "$_SCRIPT_DIR/lib/claim.sh"
+# shellcheck source=lib/scrub.sh
+source "$_SCRIPT_DIR/lib/scrub.sh"
 
 # ── Config (env, with defaults) ────────────────
 POOL_USER_DOMAIN="${POOL_USER_DOMAIN:-}"
@@ -50,6 +52,7 @@ LAB_USER_PASSWORD_SECRET="${LAB_USER_PASSWORD_SECRET:-NR_LAB_USER_PASSWORD}"
 DRY_RUN=0
 ASSUME_YES=0
 HEADLESS=0
+FORCE=0
 POS=()
 
 # Looked up once per `accounts create` run (see _load_lookup_ids).
@@ -77,6 +80,13 @@ Usage: provision.sh <group> <subcommand> [args] [--dry-run] [--yes]
                             each with admin grant, ingest LICENSE key, "<name> - ReadOnly" group
                             and its LAB_READONLY_ROLE grant. Idempotent: finished steps are skipped.
   accounts status           Table of lab accounts: group, claimed-by / free, license key yes/no
+  accounts scrub <account|--all>
+                            Delete everything a learner created in a lab account (alert policies, muting
+                            rules, alert workflows, channels, destinations, Workflow Automation definitions,
+                            dashboards, entities, other users' user keys) so the next learner starts blank.
+                            <account> is an id or a name ("INSTRUQT_LAB 02"). Shows a dry pass and asks 'yes'.
+                            Skips an account whose group has a member (a lab in progress) unless --force.
+                            The lab cleanup runs the same scrub; use this to retry one that failed.
   accounts destroy          Remove members, delete groups, cancel each account twice (asks 'yes')
 
   pair claim [email] [account name]
@@ -90,6 +100,7 @@ Global flags (anywhere after the subcommand):
   --dry-run                 Read-only lookups only; print what WOULD be created/skipped/removed
   --yes, -y                 Skip confirmation prompts
   --headless                Browser commands only: run Chrome without a window
+  --force                   accounts scrub: also scrub an account that is claimed right now
 
 Environment (default):
   NEW_RELIC_API_KEY         User API key (else the 'newrelic' CLI profile is used)
@@ -829,6 +840,73 @@ cmd_accounts_destroy() {
   if [[ "$failed" -gt 0 ]]; then return 1; fi
 }
 
+# accounts scrub <account id|name|--all>: lib/scrub.sh on one or every lab account.
+cmd_accounts_scrub() {
+  local want="$1" accts targets groups users total acct_json id name gid member want_dry="$DRY_RUN" failed=0 done_count=0
+  _validate_prefix || return 1
+  if [[ -z "$want" ]]; then
+    print_err "Name a lab account (id or '${LAB_ACCOUNT_PREFIX} NN'), or pass --all"
+    return 2
+  fi
+  _ctx || return 1
+  accts=$(_lab_accounts) || return 1
+  if [[ "$want" == "--all" ]]; then
+    targets="$accts"
+  else
+    targets=$(jq -c --arg w "$want" '[.[] | select((.id | tostring) == $w or .name == $w)]' <<<"$accts")
+  fi
+  total=$(jq 'length' <<<"$targets")
+  if [[ "$total" -eq 0 ]]; then
+    print_err "No lab account matches '$want' (only '${LAB_ACCOUNT_PREFIX} NN' accounts can be scrubbed)"
+    return 1
+  fi
+  groups=$(fetch_lab_groups) || return 1
+  users=$(fetch_users) || return 1
+
+  # Dry pass first, always: it is the list the confirmation is about.
+  local runnable="[]"
+  print_step "What would be deleted"
+  while IFS= read -r acct_json <&3; do
+    id=$(jq -r '.id' <<<"$acct_json")
+    name=$(jq -r '.name' <<<"$acct_json")
+    gid=$(jq -r --arg n "${name}${POOL_LAB_GROUP_SUFFIX}" '[.[] | select(.name == $n)] | first | .id // empty' <<<"$groups")
+    member=""
+    if [[ -n "$gid" ]]; then
+      member=$(jq -r --arg g "$gid" '[.[] | select((.groups.items // []) | map(.id) | index($g) != null) | .email] | join(", ")' <<<"$users")
+    fi
+    if [[ -n "$member" && "$FORCE" != 1 ]]; then
+      print_warn "$name is claimed by ${member} (a lab may be running): skipped. Pass --force to scrub it anyway."
+      continue
+    fi
+    DRY_RUN=1 scrub_account "$id" || true
+    runnable=$(jq -c --argjson a "$acct_json" '. + [$a]' <<<"$runnable")
+  done 3< <(jq -c '.[]' <<<"$targets")
+  DRY_RUN="$want_dry"
+
+  total=$(jq 'length' <<<"$runnable")
+  if [[ "$total" -eq 0 ]]; then
+    print_warn "Nothing to scrub."
+    return 0
+  fi
+  if [[ "$DRY_RUN" == 1 ]]; then
+    echo ""
+    echo "Dry run: nothing was deleted."
+    return 0
+  fi
+  echo ""
+  _confirm_yes "This permanently deletes the objects listed above in $total lab account(s)." || { print_warn "Aborted."; return 0; }
+
+  while IFS= read -r acct_json <&3; do
+    id=$(jq -r '.id' <<<"$acct_json")
+    print_step "$(jq -r '.name' <<<"$acct_json") (id $id)"
+    if scrub_account "$id"; then done_count=$(( done_count + 1 )); else failed=$(( failed + 1 )); fi
+  done 3< <(jq -c '.[]' <<<"$runnable")
+
+  echo ""
+  echo "Scrubbed: $done_count  |  With errors: $failed"
+  if [[ "$failed" -gt 0 ]]; then return 1; fi
+}
+
 # ═════════════════ browser tooling (Selenium) ═════════════════
 # Thin wrapper over selenium/pool_users.py. These commands talk to the New Relic web UI, not
 # NerdGraph, so they need no API key. --dry-run only lists the users; no browser is started.
@@ -923,6 +1001,7 @@ _parse_flags() {
   DRY_RUN=0
   ASSUME_YES=0
   HEADLESS=0
+  FORCE=0
   POS=()
   local a
   for a in "$@"; do
@@ -930,6 +1009,7 @@ _parse_flags() {
       --dry-run) DRY_RUN=1 ;;
       --yes|-y) ASSUME_YES=1 ;;
       --headless) HEADLESS=1 ;;
+      --force) FORCE=1 ;;
       *) POS[${#POS[@]}]="$a" ;;
     esac
   done
@@ -954,6 +1034,8 @@ dispatch() {
                       cmd_pair_claim "$arg" "$(IFS=' '; echo "${POS[*]:2}")" ;;
     accounts:create)  cmd_accounts_create "$arg" ;;
     accounts:status)  cmd_accounts_status ;;
+    accounts:scrub)   # an unquoted account name ("INSTRUQT_LAB 02") arrives as several words: re-join them
+                      cmd_accounts_scrub "$(IFS=' '; echo "${POS[*]:1}")" ;;
     accounts:destroy) cmd_accounts_destroy ;;
     *)
       print_err "Unknown command: '${group}${sub:+ $sub}'"

@@ -5,7 +5,8 @@ Read this first if the project was moved to a new repo.
 Last updated 2026-10-30 (grant fix, merged into demo-app/pool-lab).
 
 First consumer: the Workflow Automation masterclass track (`devrel-workflow-automation-masterclass/`, VM `wfa-infra`), where this kit is Phase 6 (account provisioning and mapping) in that track's `STATUS.md`.
-**Single home (since 2026-10-30):** `devrel-workflow-automation-masterclass/demo-app/pool-lab/`, inside the `demo-app` checkout (`zmrfzn/workflow-automation-demo-app`, branch `main`), untracked (`?? pool-lab/`), not pushed.
+**Single home (since 2026-10-30):** `devrel-workflow-automation-masterclass/demo-app/pool-lab/`, inside the `demo-app` checkout (`zmrfzn/workflow-automation-demo-app`).
+Committed on branch `pool-user-subaccount-module` (`8c6aa19`, no upstream, not pushed); the branch also carries the loadgen hardening cherry-picked from `main`.
 It was developed in `newrelic/mars-instruqt/pool-lab/` (branch `pool-user-subaccount-module`) and moved here; that copy is retired (only a `MOVED.md` pointer remains).
 The previous `demo-app/pool-lab` copy is backed up at `codespace/instruqt/pool-lab-backup-2026-10-30/`.
 `pool-lab/.gitignore` now carries all its own ignore rules (`.env`, `dist/`, `invites.json`, `selenium/.venv/`, `__pycache__/`, `.hypergrep/`).
@@ -54,12 +55,13 @@ That depends on a custom image and is hardwired to the MARS org and a `mars` mai
 | `provision.sh` | Instructor CLI (see commands below). Auto-sources `pool-lab/.env`. |
 | `lib/common.sh` | Print helpers, NerdGraph `gql` (curl, or `newrelic` CLI fallback), paginated `fetch_users` / `fetch_lab_groups`, accounts and license-key lookup, `agent_var_set/get` with file fallback. |
 | `lib/claim.sh` | `claim_pair`: pick a free user and group, add membership, re-poll both sides, roll back and retry with jitter on collision. |
-| `lab/bootstrap.sh`, `lab/teardown.sh` | Run in the Instruqt VM at lab start and end. Bootstrap claims the pair, resolves the account id and license key, and sets agent variables. Teardown only removes the user from the group. |
+| `lib/scrub.sh` | `scrub_account <id>`: delete everything a learner created in a lab account (see "Account scrub"). Used by `teardown.sh` and `provision.sh accounts scrub`. |
+| `lab/bootstrap.sh`, `lab/teardown.sh` | Run in the Instruqt VM at lab start and end. Bootstrap claims the pair, resolves the account id and license key, and sets agent variables. Teardown scrubs the account, then removes the user from the group. |
 | `build-lab-scripts.sh` | Builds self-contained `dist/setup-<vm>` and `dist/cleanup-<vm>` track scripts (lines marked `# pool-lab:inline` are dropped). |
 | `instruqt/config.snippet.yml` | Secrets and env to merge into the track's `config.yml`. |
 | `selenium/pool_users.py` | Browser tooling copied from MARS `gameday.py`: accept invites, validate shared password (read-only), reset passwords. |
 | `appsscript/parse-invitations.gs` | Optional Gmail → `invites.json` parser for `--accept-invites`. |
-| `tests/` | `claim-test.sh` (20), `provision-test.sh` (62), `bootstrap-test.sh` (38), `pool-users-test.sh` (13 plus 14 Python unittests). |
+| `tests/` | `claim-test.sh` (20), `provision-test.sh` (62), `bootstrap-test.sh` (38), `scrub-test.sh` (37), `pool-users-test.sh` (13 plus 14 Python unittests). |
 | `README.md` | Human runbook: before the workshop, at lab start, after the workshop, troubleshooting. |
 
 ## Commands
@@ -68,10 +70,10 @@ That depends on a custom image and is hardwired to the MARS org and a `mars` mai
 cd pool-lab
 ./provision.sh users create | status | free [email] | delete
 ./provision.sh users accept-invites | validate-passwords | reset-passwords   # browser tooling, no API key
-./provision.sh accounts create [N] | status | destroy
+./provision.sh accounts create [N] | status | scrub <account|--all> | destroy
 ./provision.sh pair claim [email "account name"]    # local test of the lab-time mapping, no Instruqt
 # flags: --dry-run (read-only), --yes, --headless
-./tests/claim-test.sh && ./tests/provision-test.sh && ./tests/bootstrap-test.sh && ./tests/pool-users-test.sh
+./tests/claim-test.sh && ./tests/provision-test.sh && ./tests/bootstrap-test.sh && ./tests/scrub-test.sh && ./tests/pool-users-test.sh
 ```
 
 Local run of the lab scripts: set `LAB_NR_API_KEY_SECRET=NEW_RELIC_API_KEY`, run `lab/bootstrap.sh`, check `/tmp/pool-lab-vars/`, then `lab/teardown.sh`.
@@ -154,6 +156,20 @@ Role ids are org-wide standard roles: `read_only` 1252, `standard_user` 1253, `a
   Re-running `accounts create` with the new role adds the grant but leaves `read_only` in place.
 - Keep the group suffix ` - ReadOnly` even though the role is no longer read-only: `bootstrap.sh` derives the account name from it, and renaming means recreating the groups.
 
+## Account scrub (built 2026-10-30)
+
+Lab accounts and pool users are reused, so whatever a learner creates would otherwise reach the next learner, and `wfa_bootstrap.py` reuses objects that already exist by name.
+Decision (user): wipe everything in the lab account, at lab end automatically and on demand with `accounts scrub`.
+- The `newrelic` CLI (0.99.6) cannot do this: it has only `apiAccess apiAccessDeleteKeys` and raw `nerdgraph query` (which hides errors), with no alert commands and no entity delete.
+  The scrub calls NerdGraph through `gql`.
+- Order, dependents first: Workflow Automation schedules and definitions (ACCOUNT scope only), alert workflows (`deleteChannels: true`), channels, destinations, muting rules, policies, open issues (`aiIssuesResolveIssue`), top-level dashboards, synthetic monitors, every other entity (`entityDelete` with `forceDelete`, retried with `agentApplicationDelete(force)` for APM apps), then pool users' USER keys (`apiAccessDeleteKeys`).
+- Kept: ingest keys, keys of non-pool users (instructors), the caller's key, AIOPS entities (they are index entries for the alert objects deleted earlier), the account and group, and NRDB data.
+- Guard: refuses any account not named `<LAB_ACCOUNT_PREFIX> NN`; `accounts scrub` skips a claimed account unless `--force`.
+- Every list query and every mutation's argument types were checked by read-only introspection, and `accounts scrub --all --dry-run` ran clean against the real org on 2026-10-30.
+  It found Challenge 2 leftovers in `INSTRUQT_LAB 01` (alert workflow, channel, email destination, policy, 14 entities, one `labpool+002` key).
+- Not yet run for real (needs the user's go-ahead): whether `entityDelete` accepts INFRA HOST and CONTAINER and BROWSER entities, and whether the Organization Manager key may delete a pool user's key.
+- Deleting an entity while its agent still reports recreates it, so the track cleanup must stop data first (`docker compose down`, `systemctl stop newrelic-infra`) before the teardown runs.
+
 ## Known issues and gotchas
 
 - **Duplicate accounts are dangerous.** An early run created <old-duplicate-account-id-1> and, on re-run, <old-duplicate-account-id-2>, both named `INSTRUQT_LAB 01` (both gone as of 2026-10-30).
@@ -183,14 +199,18 @@ Role ids are org-wide standard roles: `read_only` 1252, `standard_user` 1253, `a
 - Collision policy differs from MARS: the claim checks both the user side and the group side and has no smallest-id tie-break.
 - Generated or local files that must stay out of git: `.env`, `dist/`, `invites.json` (holds the password and accept links), `selenium/.venv/`, `__pycache__/`, `.hypergrep/`.
 
-## Masterclass wiring status (read 2026-10-30, not yet fixed)
+## Masterclass wiring status (checked 2026-10-30)
 
-- `track_scripts/setup-wfa-infra` ends with `bash /root/workflow-automation-demo-app/pool-lab/lab/bootstrap.sh`, but `pool-lab/` is not in the cloned GitHub repo, so under `set -e` the launch fails.
-  Recommended: embed `dist/setup-wfa-infra` via a heredoc into `/usr/local/bin/pool-lab-setup` and run it with `set +x`, then the `profile.d` export.
-- `01-setup-and-instrument/setup-wfa-infra` has the built claim script and the `profile.d` block appended after `exit 0` / `exit 1`: dead code; remove it.
-- `track_scripts/cleanup-wfa-infra` inlines the current built teardown (matches `dist/cleanup-wfa-infra`): fine.
-- `config.yml` env and secret indirection (`NR_DEVREL_LAB_API_KEY`, `NR_DEVREL_LAB_USER_PASSWORD`) are correct; the secrets' existence in Instruqt is unchecked.
-- Missing: `profile.d` export of `NEW_RELIC_ACCOUNT_ID` / `NEW_RELIC_LICENSE_KEY` at track level (so `wire-credentials.sh` asks only for the learner's `NRAK-` key), and challenge 01 showing the login via `[[ Instruqt-Var key="POOL_USER_EMAIL" hostname="wfa-infra" ]]` and `LAB_USER_PASSWORD`.
+- `track_scripts/setup-wfa-infra` writes the built `setup-wfa-infra` into `/usr/local/bin/pool-lab-setup` through a quoted heredoc, with `set +x`, and runs it.
+  The `profile.d` export of `NEW_RELIC_ACCOUNT_ID` / `NEW_RELIC_LICENSE_KEY` runs at the end of that script.
+  The heredoc body is identical to a fresh `build-lab-scripts.sh --vm wfa-infra` build; rebuild and re-paste after any `lib/` or `lab/` change.
+- `track_scripts/cleanup-wfa-infra` runs `docker compose down`, then the inlined built teardown (identical to a fresh build).
+- `01-setup-and-instrument/setup-wfa-infra` is back to the image pull only; the dead claim copy after `exit` is removed.
+- `config.yml` env and secret indirection (`NR_DEVREL_LAB_API_KEY`, `NR_DEVREL_LAB_USER_PASSWORD`) match the bootstrap's env contract; the secrets' existence in Instruqt is unchecked.
+- `lab/wire-credentials.sh` uses values already in the environment, so with the `profile.d` export it asks only for the learner's `NRAK-` key.
+- Missing: challenge 01 copy still tells learners to find the license key and account ID themselves, and does not show the login (`[[ Instruqt-Var key="POOL_USER_EMAIL" hostname="wfa-infra" ]]`, `LAB_USER_PASSWORD`).
+- Unchecked: whether Instruqt exposes the `NR_DEVREL_LAB_API_KEY` secret in learner terminals (`env | grep NR_DEVREL` on a test lab).
+- An exhausted pool makes `pool-lab-setup` exit 1, which fails the whole launch; there is no fallback to manual key entry.
 - Before testing: `./provision.sh accounts create 2` (lab 01 has no grant) and `./provision.sh users free labpool+002@example.com`.
 
 ## Suggested next steps

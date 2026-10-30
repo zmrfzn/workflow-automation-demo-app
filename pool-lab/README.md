@@ -21,8 +21,8 @@ At lab start the VM only pairs a free user with a free group, so there is no pro
   A group with no members is free.
 - **Claim** (lab start): `lab/bootstrap.sh` picks a random free user and a random free group, adds the user to the group, then checks that nobody else claimed either one.
   On a collision it removes its own membership and retries with jittered backoff.
-- **Release** (lab end): `lab/teardown.sh` removes the user from the group.
-  Groups and accounts persist for reuse.
+- **Scrub and release** (lab end): `lab/teardown.sh` first deletes everything the learner created in the account (`lib/scrub.sh`), then removes the user from the group.
+  Groups and accounts persist for reuse, and the next learner who claims the account starts from blank.
 
 ```mermaid
 flowchart TB
@@ -39,7 +39,7 @@ flowchart TB
     end
 
     subgraph end_["Lab end"]
-        T["lab/teardown.sh<br/>remove user from group"]
+        T["lab/teardown.sh<br/>scrub account, remove user from group"]
     end
 
     after["After the workshop<br/>users free, accounts destroy"]
@@ -71,7 +71,8 @@ pool-lab/
 ├── build-lab-scripts.sh          # builds self-contained dist/setup-<vm> and dist/cleanup-<vm>
 ├── lib/
 │   ├── common.sh                 # gql(), context, user/group/account/key lookups, agent_var_set/get
-│   └── claim.sh                  # claim_pair(): pairing with exclusivity check and rollback
+│   ├── claim.sh                  # claim_pair(): pairing with exclusivity check and rollback
+│   └── scrub.sh                  # scrub_account(): delete everything a learner created in a lab account
 ├── lab/
 │   ├── bootstrap.sh              # runs in the Instruqt VM at lab start
 │   └── teardown.sh               # runs in the Instruqt VM at lab end
@@ -228,9 +229,20 @@ These steps are done once per track, not once per learner.
 ```bash
 ./provision.sh users free            # remove users from lab groups (never deletes groups)
 ./provision.sh users free <email>    # free a single user
+./provision.sh accounts scrub --all --dry-run   # list what is left in the lab accounts
+./provision.sh accounts scrub --all  # delete it (asks 'yes'; skips claimed accounts unless --force)
 ./provision.sh accounts destroy      # remove groups and cancel each account twice
 ./provision.sh users delete          # optional: delete the pool users
 ```
+
+- `accounts scrub <account|--all>` runs the same scrub as the lab cleanup.
+  Use it when a lab ended without a clean `teardown.sh`, or before a workshop to start every account blank.
+  `<account>` is an id or a name such as `"INSTRUQT_LAB 02"`.
+  It always shows a dry pass first and asks for `yes`.
+- What the scrub deletes, in this order: Workflow Automation schedules and definitions, alert workflows (with their channels), remaining channels, destinations (including the Workflow Automation destination that stores the learner's `NRAK-` key), muting rules, alert policies (with their conditions), open issues, dashboards, synthetic monitors, every other entity (forced), and the user keys that pool users own on the account.
+- What it never deletes: ingest license keys, keys of anyone who is not a pool user, the account, the lab group, and telemetry already stored.
+  Data in NRDB (transactions, errors, logs, change markers) stays until its retention expires; deleting an entity only removes it from the UI and entity search.
+- It refuses any account whose name is not `<LAB_ACCOUNT_PREFIX> NN`.
 
 - `users free` only removes users from lab groups and never deletes the groups.
   Use it to recover from labs that ended without running `teardown.sh`.
@@ -278,6 +290,7 @@ The offline tests stub `gql`, so they cannot catch a wrong shape.
 | EU login and UI hosts (`login.eu.newrelic.com`, `one.eu.newrelic.com`) | `selenium/pool_users.py` with `NR_REGION=EU` | Hosts or page layout may differ; untested |
 | Plus-address delivery to a Google Group (`labpool+test@example.com`) | Invite delivery in "Before the workshop" | Not verified on your Workspace; send a test mail first |
 | Login page selectors | `selenium/pool_users.py` | Written against the MARS tool and not run against pool-lab; New Relic page changes break them |
+| Scrub deletes | `lib/scrub.sh`, `accounts scrub`, `teardown.sh` | Every list query was checked live with `--dry-run` (2026-10-30); no delete has run yet. Unknown: which entity types `entityDelete` accepts, and whether the Organization Manager key may delete a pool user's user key |
 
 Before relying on the kit:
 1. Run every `provision.sh` command with `--dry-run` first.
@@ -318,6 +331,7 @@ They stub `gql` and make no network calls, so they are safe to run anywhere.
 ./tests/claim-test.sh       # claim_pair: clean claim, user and group collisions, empty pools
 ./tests/provision-test.sh   # provision.sh subcommands, including --dry-run making no mutations
 ./tests/bootstrap-test.sh   # lab/bootstrap.sh and teardown.sh with a file-backed agent variable store
+./tests/scrub-test.sh       # lib/scrub.sh and accounts scrub: order, guards, dry run, kept keys, failures
 ./tests/pool-users-test.sh  # selenium/pool_users.py and the users accept-invites / validate-passwords / reset-passwords wrappers (no browser)
 ```
 
